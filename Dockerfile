@@ -4,9 +4,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-# Base URL of the operator API, baked into the bundle at build time (Vite reads VITE_* variables)
-ARG VITE_API_URL=https://api-operator.gilab.rs/api/
-ENV VITE_API_URL=$VITE_API_URL
+# Base URL of the operator API, baked into the bundle at build time. Read from .env in
+# the build context, or from `--build-arg VITE_API_URL=...`, which takes precedence.
+ARG VITE_API_URL
 RUN npm run build
 
 # Runtime stage: static files served by nginx with SPA fallback

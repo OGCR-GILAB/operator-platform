@@ -2,10 +2,10 @@ import axios from "axios";
 
 // OGCR Operator API — middleware between the DCR platform and this frontend.
 // https://api-operator.gilab.rs/api/docs/
-// In dev either the Vite proxy (`/api`, see vite.config.js) or the API origin
-// directly works: the API allowlists localhost:3100 / 127.0.0.1:3100 / localhost:5173.
-export const API_BASE_URL = import.meta.env.VITE_API_URL
-  || (import.meta.env.DEV ? '/api' : 'https://api-operator.gilab.rs/api');
+// Base URL comes from VITE_API_URL in .env (see .env.example); vite.config.js
+// refuses to start without it. The API allowlists localhost:3100 / 127.0.0.1:3100 /
+// localhost:5173 for CORS, so dev calls it directly.
+export const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 const SESSION_KEY = 'ogcr_session';
 

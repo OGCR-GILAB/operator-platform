@@ -1,18 +1,17 @@
-import { defineConfig } from 'vite'
+import process from 'node:process'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  server: {
-    // Convenience only: the API allowlists localhost:3100/5173 for CORS, so
-    // setting VITE_API_URL to the API origin directly also works in dev.
-    proxy: {
-      '/api': {
-        target: 'https://api-operator.gilab.rs',
-        changeOrigin: true,
-      },
-    },
-  },
+export default defineConfig(({ mode }) => {
+  // .env files merged with process.env (process.env wins, e.g. a Docker build-arg)
+  const env = loadEnv(mode, process.cwd(), 'VITE_')
+  if (!env.VITE_API_URL) {
+    throw new Error('VITE_API_URL is not set. Copy .env.example to .env and set the operator API URL.')
+  }
+
+  return {
+    plugins: [react(), tailwindcss()],
+  }
 })
