@@ -89,8 +89,9 @@ class $projects {
   }
 
   /**
-   * Only `parcel` matters. DCR's `parcel_activity` link has no status or amount;
-   * per-parcel verification comes from `dcrStatus()`.
+   * Only `parcel` matters. The link stays local: after a submit the
+   * certification platform registers the parcels on DCR itself. Per-parcel
+   * verification comes from `dcrStatus()`.
    */
   async linkParcel(projectId, model) {
     const payload = typeof model === 'object' ? model : { parcel: model };
@@ -122,22 +123,28 @@ class $projects {
   }
 
   /**
-   * Pushes operator, activity, plans, parcels and documents to DCR in one call.
-   * 400 -> `{detail, problems[]}`; 502 -> `{detail, step}` and the project stays
-   * editable, so the UI should offer a resubmit rather than a dead end.
+   * Pushes operator, activity, plans and parcels to DCR in one call. Documents
+   * stay here; the certifier fetches them through the partner API.
+   * 400 -> `{detail, problems[]}`; 403 -> `{detail, step: "permissions",
+   * bank_id, missing_roles[]}`, refused before anything is written to DCR;
+   * 502 -> `{detail, step}` and the project stays editable, so the UI should
+   * offer a resubmit rather than a dead end.
    */
   async submit(projectId) {
     const { data } = await api.post(`/projects/${projectId}/submit/`);
     return data;
   }
 
-  /** Last known DCR outcome. Poll on page load, not continuously. */
+  /**
+   * Last known DCR outcome. The server refreshes verification, certificates
+   * and audit reports every 15 minutes, so read it on page load — no polling.
+   */
   async dcrStatus(projectId) {
     const { data } = await api.get(`/projects/${projectId}/dcr-status/`);
     return data;
   }
 
-  /** Refresh the outcome from DCR. 409 if the project was never submitted. */
+  /** Ask DCR right now ("refresh now"). 409 if the project was never submitted. */
   async refreshDcrStatus(projectId) {
     const { data } = await api.post(`/projects/${projectId}/dcr-status/`);
     return data;
@@ -145,7 +152,9 @@ class $projects {
 }
 
 export const SUBMIT_STEP_LABELS = {
+  permissions: 'DCR permissions',
   operator: 'operator',
+  user_operator_relationship: 'operator membership',
   activity: 'activity',
   activity_plan: 'activity plan',
   monitoring_plan: 'monitoring plan',

@@ -51,7 +51,7 @@ class $parcels {
     return data;
   }
 
-  /** `status_code` is one of in_progress / verified / failed. */
+  /** The operator sets `status_code` to in_progress / verified / failed; a DCR verdict may be any VERIFICATION_STATUSES code. */
   async saveOwnerVerification(parcelId, model) {
     const { data } = await api.put(`/parcels/${parcelId}/owner-verification/`, model);
     return data;
@@ -59,6 +59,33 @@ class $parcels {
 
   async patchOwnerVerification(parcelId, model) {
     const { data } = await api.patch(`/parcels/${parcelId}/owner-verification/`, model);
+    return data;
+  }
+
+  /** The declared owner (DCR `parcel_owner`); `404` while none is declared. */
+  async owner(parcelId) {
+    const { data } = await api.get(`/parcels/${parcelId}/owner/`);
+    return data;
+  }
+
+  /** `{legal_name, owner_type, country_code, document}`; `document` may be null. */
+  async saveOwner(parcelId, model) {
+    const { data } = await api.put(`/parcels/${parcelId}/owner/`, model);
+    return data;
+  }
+
+  async patchOwner(parcelId, model) {
+    const { data } = await api.patch(`/parcels/${parcelId}/owner/`, model);
+    return data;
+  }
+
+  /**
+   * Legal-person holders the land registry knows for a French parcel
+   * (DGFiP open data), with `matches_declared` against the declared owner.
+   * `404` when the parcel has no French cadastral reference.
+   */
+  async registryOwners(parcelId) {
+    const { data } = await api.get(`/parcels/${parcelId}/registry-owners/`);
     return data;
   }
 }

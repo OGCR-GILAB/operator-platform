@@ -1,11 +1,14 @@
 import { useState } from "react";
-import Modal from "../ui/Modal";
-import Message from "../ui/Message";
-import TextField from "../ui/TextField";
+import { Input, Message } from "@majistudio/ogcr-design-system";
+import Dialog from "../ui/Dialog";
 import ParcelCadastrePicker from "./ParcelCadastrePicker";
 import $parcels from "../../services/$parcels";
 import $auth from "../../services/$auth";
 import Parcel from "../../models/parcel";
+import { otherFieldErrors } from "../../services/$api";
+
+// Inputs that show their own error; anything else goes in the banner.
+const SHOWN_FIELDS = ["geometry", "name", "cadastral_reference", "iacs_codes", "lpis_codes"];
 
 const parseCodes = (value) =>
   String(value || "")
@@ -13,8 +16,26 @@ const parseCodes = (value) =>
     .map((code) => code.trim())
     .filter(Boolean);
 
-/** Create or edit a parcel. `parcel` null means create. */
-function ParcelFormModal({ isOpen, onClose, onSaved, operatorId, parcel = null }) {
+const READ_ONLY_SUBTITLES = {
+  registered: "This parcel is registered on DCR and can no longer be changed. Its documents and owner stay editable.",
+  submitted: "This parcel belongs to a submitted activity and can no longer be changed.",
+};
+
+/**
+ * Create or edit a parcel. `parcel` null means create. `readOnly` shows a
+ * parcel the API would answer 409 to any change for; `lockedReason` says why:
+ * `registered` (the certification platform registered it on DCR) or
+ * `submitted` (its activity is submitted and not open for changes).
+ */
+function ParcelFormModal({
+  isOpen,
+  onClose,
+  onSaved,
+  operatorId,
+  parcel = null,
+  readOnly = false,
+  lockedReason = "submitted",
+}) {
   const isEdit = Boolean(parcel?.id);
 
   const [form, setForm] = useState(() => ({
@@ -69,47 +90,53 @@ function ParcelFormModal({ isOpen, onClose, onSaved, operatorId, parcel = null }
       const fields = $auth.getFieldErrors(err);
       setFieldErrors(fields);
       // Invalid geometries (self-intersections) come back with an explanation.
-      setError(Object.keys(fields).length ? "" : $auth.getErrorMessage(err));
+      setError(Object.keys(fields).length
+        ? otherFieldErrors(fields, SHOWN_FIELDS)
+        : $auth.getErrorMessage(err));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={saving ? () => {} : onClose}
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => { if (!open && !saving) onClose(); }}
       size="xl"
-      title={isEdit ? "Edit parcel" : "Add parcel"}
-      subtitle="Parcels stay on the Operator Platform until the activity they belong to is submitted."
-      secondaryAction={{ label: "Cancel", onClick: onClose, disabled: saving }}
-      primaryAction={{
+      title={readOnly ? "Parcel" : (isEdit ? "Edit parcel" : "Add parcel")}
+      description={readOnly
+        ? (READ_ONLY_SUBTITLES[lockedReason] || READ_ONLY_SUBTITLES.submitted)
+        : "Parcels stay on the Operator Platform until their activity is submitted; the certification platform then registers them on DCR."}
+      primaryAction={readOnly ? undefined : {
         label: saving ? "Saving…" : (isEdit ? "Save changes" : "Add parcel"),
         onClick: handleSave,
         disabled: saving || !selection,
+        closeOnClick: false,
       }}
+      secondaryAction={{ label: readOnly ? "Close" : "Cancel", disabled: saving }}
     >
       <div className="ogcr-form-stack">
         {Boolean(error) && (
-          <Message variant="error" floating title="Could not save the parcel" description={error} onClose={() => setError("")} />
+          <Message state="error" type="floating" title="Could not save the parcel" description={error} onDismiss={() => setError("")} />
         )}
 
         <ParcelCadastrePicker
           value={selection}
           onChange={setSelection}
           error={fieldErrors.geometry}
-          disabled={saving}
+          disabled={saving || readOnly}
         />
 
-        <TextField
+        <Input
           label="Name"
           placeholder="e.g., Field 4"
           value={form.name}
           onChange={(event) => setForm({ ...form, name: event.target.value })}
+          disabled={readOnly}
           error={Boolean(fieldErrors.name)}
           helperText={fieldErrors.name || ""}
         />
-        <TextField
+        <Input
           label="Cadastral reference"
           placeholder="Confirm a parcel to fill this in"
           value={selection?.idu || ""}
@@ -119,24 +146,26 @@ function ParcelFormModal({ isOpen, onClose, onSaved, operatorId, parcel = null }
           error={Boolean(fieldErrors.cadastral_reference)}
           helperText={fieldErrors.cadastral_reference || "Pulled from the cadastre when you confirm a parcel."}
         />
-        <TextField
+        <Input
           label="IACS codes"
           placeholder="Comma-separated"
           value={form.iacs_codes}
           onChange={(event) => setForm({ ...form, iacs_codes: event.target.value })}
+          disabled={readOnly}
           error={Boolean(fieldErrors.iacs_codes)}
           helperText={fieldErrors.iacs_codes || ""}
         />
-        <TextField
+        <Input
           label="LPIS codes"
           placeholder="Comma-separated"
           value={form.lpis_codes}
           onChange={(event) => setForm({ ...form, lpis_codes: event.target.value })}
+          disabled={readOnly}
           error={Boolean(fieldErrors.lpis_codes)}
           helperText={fieldErrors.lpis_codes || ""}
         />
       </div>
-    </Modal>
+    </Dialog>
   );
 }
 

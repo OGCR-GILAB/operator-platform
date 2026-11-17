@@ -1,4 +1,5 @@
 import { GlobeHemisphereWestIcon, MapTrifoldIcon } from "@phosphor-icons/react";
+import { ToggleGroup } from "@majistudio/ogcr-design-system";
 import { BASEMAPS } from "../../services/$map";
 
 /**
@@ -19,29 +20,25 @@ function ActivityMapBasemapSwitch(props) {
   const { value, onChange = () => {}, className = "" } = props;
 
   return (
-    <div
-      className={`ogcr-map-basemap ${className}`.trim()}
-      role="group"
+    <ToggleGroup
+      appearance="segmented"
+      size="s"
       aria-label="Basemap"
-    >
-      {BASEMAPS.map((option) => {
+      className={`ogcr-map-basemap ${className}`.trim()}
+      value={[value]}
+      // Pressing the active basemap again would leave none selected.
+      onValueChange={(next) => { if (next[0]) onChange(next[0]); }}
+      items={BASEMAPS.map((option) => {
         const Icon = BASEMAP_ICONS[option.id];
-        const active = value === option.id;
 
-        return (
-          <button
-            key={option.id}
-            type="button"
-            className={`ogcr-map-basemap__btn${active ? " active" : ""}`}
-            aria-pressed={active}
-            onClick={() => onChange(option.id)}
-          >
-            {Icon ? <Icon size={16} weight={active ? "fill" : "bold"} aria-hidden="true" /> : null}
-            <span className="ogcr-map-basemap__label">{option.label}</span>
-          </button>
-        );
+        return {
+          value: option.id,
+          icon: Icon ? <Icon size={16} weight={value === option.id ? "fill" : "bold"} /> : undefined,
+          label: <span className="ogcr-map-basemap__label">{option.label}</span>,
+          "aria-label": option.label,
+        };
       })}
-    </div>
+    />
   );
 }
 

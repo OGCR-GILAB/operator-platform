@@ -2,7 +2,7 @@
 
 Frontend for operators on the OGCR platform: projects, activities, parcels, documents and maps. It talks to the OGCR Operator API ([API docs](https://api-operator.gilab.rs/api/docs/)).
 
-Built with React 19, Vite, Tailwind CSS 4 and MapLibre GL.
+Built with React 19, Vite, Tailwind CSS 4 and MapLibre GL. UI components and design tokens come from [`@majistudio/ogcr-design-system`](https://www.npmjs.com/package/@majistudio/ogcr-design-system); `src/components/ui/` only holds app-specific pieces built on top of it. `src/index.css` styles the app's own screens with the package's tokens (`--ds-*` colours, `--spacing-*`, `--radius-*`, `--text-*`).
 
 ## Prerequisites
 
@@ -42,6 +42,16 @@ Other scripts:
 | `npm run lint`    | Run ESLint                                       |
 | `npm run build`   | Production build into `dist/`                    |
 | `npm run preview` | Serve the production build at http://localhost:3200 |
+
+## Session and API errors
+
+- **Token storage:** the DCR DirectLogin token is kept in memory and mirrored to `sessionStorage` (`ogcr_session`), not `localStorage`. It survives a reload but not closing the tab, which keeps a token stolen through XSS short-lived. Any copy left in `localStorage` by older builds is moved across and deleted. The DCR roles block is never stored; `auth/me/` is re-read on every load.
+- **Global response handling** (`src/services/$api.js`):
+  - `401` (token invalid or expired) clears the session, returns to `/` and reopens sign-in with a "Session expired" message.
+  - `429` shows "Too many requests — try again in a minute".
+  - `503` shows "DCR is unreachable".
+
+  Calls where these statuses mean something else opt out with `skipUnauthorized` / `skipServiceErrors` (sign-in, password reset).
 
 ## Deploy
 

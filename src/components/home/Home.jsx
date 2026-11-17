@@ -1,92 +1,86 @@
 import {
   MapTrifoldIcon,
   FileArrowUpIcon,
-  FileTextIcon,
+  FilesIcon,
   LeafIcon,
-  TrendUpIcon,
-  UsersIcon,
   ArrowRightIcon,
   CheckCircleIcon,
+  CertificateIcon,
   FarmIcon,
   ProjectorScreenChartIcon,
   MapPinAreaIcon,
   ClipboardTextIcon,
-  ChartBarIcon,
-  TimerIcon,
   ChecksIcon,
-  BroadcastIcon,
+  PaperPlaneTiltIcon,
+  UserCheckIcon,
 } from "@phosphor-icons/react";
 import $log from "../../services/$log";
-import Card from "../ui/Card";
-import Button from "../ui/Button";
-import Pill from "../ui/Pill";
-import { useGlobal } from "../providers/GlobalContext";
-import { useNavigate } from "react-router-dom";
+import { Button, Card, Pill } from "@majistudio/ogcr-design-system";
 
 const stats = [
   {
-    value: "1 dashboard",
-    label: "Activities, parcels, GIS and reports",
+    value: "One workspace",
+    label: "Details, parcels, plans, documents and map per activity",
     icon: <ProjectorScreenChartIcon size={20} weight="duotone" />,
   },
   {
-    value: "Parcel-first",
-    label: "Import boundaries and field data fast",
+    value: "Cadastre-based",
+    label: "Parcel boundary and reference from the same record",
     icon: <MapPinAreaIcon size={20} weight="duotone" />,
   },
   {
-    value: "Always visible",
-    label: "Monitor activity health and risks",
-    icon: <BroadcastIcon size={20} weight="duotone" />,
+    value: "Checked first",
+    label: "Readiness checks and your DCR permissions before submit",
+    icon: <ChecksIcon size={20} weight="duotone" />,
   },
   {
-    value: "Report-ready",
-    label: "Generate evidence for submission cycles",
-    icon: <FileTextIcon size={20} weight="duotone" />,
+    value: "Outcome in view",
+    label: "Verification, certificate and audit reports from DCR",
+    icon: <CertificateIcon size={20} weight="duotone" />,
   },
 ];
 
 const features = [
   {
     icon: <LeafIcon size={28} weight="duotone" />,
-    title: "Carbon Activity Workspace",
+    title: "Activity workspace",
     description:
-      "Create and manage one or many carbon activities with milestones, documents, approvals, and status tracking in one place.",
+      "Create activities under your operator and work on them in any order. A setup guide shows what is still missing.",
     tone: "positive",
   },
   {
     icon: <MapTrifoldIcon size={28} weight="duotone" />,
-    title: "Parcel Import & Mapping",
+    title: "Parcels from the cadastre",
     description:
-      "Import parcels from spreadsheets, shapefiles, or field records, then organize them on an interactive GIS map with clear ownership and activity links.",
+      "Search by commune, section and number. The parcel's boundary and cadastral reference come from the same record, with IACS / LPIS codes if you have them.",
     tone: "brand",
   },
   {
-    icon: <TrendUpIcon size={28} weight="duotone" />,
-    title: "Monitoring & Performance",
+    icon: <UserCheckIcon size={28} weight="duotone" />,
+    title: "Declared ownership",
     description:
-      "Track parcel activity, progress, issuance readiness, and field observations through live dashboards and status summaries.",
+      "Name each parcel's owner and attach the proof. Where the land registry knows the parcel, its owners are shown alongside.",
     tone: "warning",
   },
   {
-    icon: <ClipboardTextIcon size={28} weight="duotone" />,
-    title: "Submission & Reporting",
+    icon: <FilesIcon size={28} weight="duotone" />,
+    title: "Plans and documents",
     description:
-      "Prepare validation packs, reporting periods, and carbon credit evidence with structured records and exportable summaries.",
+      "Activity and monitoring plans, plus versioned documents you can preview without leaving the platform.",
     tone: "neutral",
   },
   {
-    icon: <UsersIcon size={28} weight="duotone" />,
-    title: "Farmer & Developer Collaboration",
+    icon: <PaperPlaneTiltIcon size={28} weight="duotone" />,
+    title: "Submission to DCR",
     description:
-      "Coordinate field teams, activity developers, and farmer groups around the same parcel data, tasks, and reporting deadlines.",
+      "Readiness checks and a live look at your DCR roles tell you up front whether the submission will go through.",
     tone: "positive",
   },
   {
-    icon: <ChartBarIcon size={28} weight="duotone" />,
-    title: "Portfolio Insights",
+    icon: <CertificateIcon size={28} weight="duotone" />,
+    title: "Verification and certificate",
     description:
-      "See how every activity contributes to your wider pipeline with rollups for acreage, readiness, reporting, and delivery risks.",
+      "Follow the certifier's validation and verification, answer change requests, and see the certificate and audit reports once issued.",
     tone: "neutral",
   },
 ];
@@ -94,46 +88,47 @@ const features = [
 const workflow = [
   {
     icon: <FarmIcon size={22} weight="duotone" />,
-    title: "Set up your activity",
-    description: "Register a new carbon activity, define methodology, assign landowners, and capture baseline details.",
+    title: "Set up the activity",
+    description: "Pick the certification scheme, describe the activity and its practices. It stays a draft until you submit.",
+  },
+  {
+    icon: <MapPinAreaIcon size={22} weight="duotone" />,
+    title: "Add parcels and owners",
+    description: "Find each parcel on the cadastre, then declare who owns it, backed by a deed or cadastre extract.",
   },
   {
     icon: <FileArrowUpIcon size={22} weight="duotone" />,
-    title: "Import parcels",
-    description: "Bring in parcel boundaries and tabular records, then match each parcel to the right farmer, group, or activity.",
+    title: "Plans and documents",
+    description: "Write the activity and monitoring plans and upload the supporting documents.",
   },
   {
-    icon: <BroadcastIcon size={22} weight="duotone" />,
-    title: "Monitor performance",
-    description: "Watch GIS layers, field updates, and activity checkpoints to quickly spot missing data, risks, or delays.",
-  },
-  {
-    icon: <ChecksIcon size={22} weight="duotone" />,
-    title: "Generate reports",
-    description: "Package submission-ready reports with parcel evidence, progress summaries, and the metrics needed for credit issuance.",
+    icon: <PaperPlaneTiltIcon size={22} weight="duotone" />,
+    title: "Submit to DCR",
+    description: "Readiness checks run first. The certifier then validates and verifies the activity, and the outcome shows up here.",
   },
 ];
 
 const highlightCards = [
   {
-    eyebrow: "GIS Command Center",
-    title: "See activities spatially, not just as rows in a table",
+    eyebrow: "Map",
+    title: "Every parcel of an activity on one map",
     description:
-      "Switch from activity lists to parcel maps instantly. Review boundaries, farmer clusters, monitoring hotspots, and field updates from one visual workspace.",
-    bullets: ["Parcel overlays and boundary review", "Map-based monitoring for every activity stage", "Faster issue triage for missing or risky parcels"],
+      "Review the boundaries taken from the cadastre and see at a glance which parcels are registered on DCR.",
+    bullets: ["Street map or satellite imagery underneath", "Each parcel coloured by its DCR status", "Land cover and tree cover loss overlays"],
     icon: <MapTrifoldIcon size={28} weight="duotone" />,
   },
   {
-    eyebrow: "Reporting Engine",
-    title: "Move from field activity to submission-ready evidence",
+    eyebrow: "Portfolio",
+    title: "All your activities at a glance",
     description:
-      "Turn activity records, parcel histories, and monitoring data into clear reporting outputs for internal review, external submission, and stakeholder updates.",
-    bullets: ["Activity summaries and audit-friendly exports", "Reporting periods with parcel-level traceability", "Reusable templates for recurring submissions"],
-    icon: <FileTextIcon size={28} weight="duotone" />,
+      "The overview shows what each activity still needs, with the drafts closest to done first.",
+    bullets: ["Activity health board", "Readiness across activities", "Upcoming actions for drafts"],
+    icon: <ClipboardTextIcon size={28} weight="duotone" />,
   },
 ];
 
-function Home() {
+/** The public landing page; signed-in users go straight to the overview. */
+function Home({ onOpenLogin, onOpenRegister }) {
   if (import.meta.env.DEV) {
     $log.success("Running in development mode");
   }
@@ -144,29 +139,29 @@ function Home() {
       <section className="ogcr-home__hero">
         <div className="ogcr-home__hero-content">
           <Pill tone="positive" className="ogcr-home__hero-badge">
-            Built for activity developers and farmers
+            Built for operators submitting to DCR
           </Pill>
-          <h1 className="ogcr-home__hero-title text-h1">
-            Manage carbon activities
+          <h1 className="ogcr-home__hero-title text-h1 tracking-[-1px]">
+            Prepare carbon activities
             <br />
-            <span className="ogcr-home__hero-title--accent">from import to report</span>
+            <span className="ogcr-home__hero-title--accent">from parcel to certificate</span>
           </h1>
           <p className="ogcr-home__hero-subtitle">
-            Operator Platform gives activity developers and farmers a single workspace
-            to create activities, import and map parcels, monitor implementation, and
-            generate the reports needed to move carbon credit programs forward.
+            Operator Platform is where operators put together a carbon activity — its
+            parcels, owners, plans and documents — check it, and submit it to DCR. The
+            certifier's verdict, certificate and audit reports come back to the same place.
           </p>
           <div className="ogcr-home__hero-actions">
-            <Button variant="filled" tone="brand" endIcon={<ArrowRightIcon size={16} weight="bold" />}>
-              Create an activity
+            <Button variant="filled" iconRight={<ArrowRightIcon size={16} weight="bold" />} onClick={onOpenRegister}>
+              Create an account
             </Button>
-            <Button variant="outlined">Explore GIS dashboard</Button>
+            <Button variant="outlined" onClick={onOpenLogin}>Sign in</Button>
           </div>
           <ul className="ogcr-home__hero-points" aria-label="Primary platform benefits">
             {[
-              "Manage multiple carbon activities in one portfolio",
-              "Import parcels and review them on an interactive map",
-              "Track progress, farmer activity, and reporting readiness",
+              "Every activity, its parcels and documents in one workspace",
+              "Parcels taken straight from the cadastre and shown on a map",
+              "Checked before you submit, followed after",
             ].map((item) => (
               <li key={item} className="ogcr-home__hero-point">
                 <CheckCircleIcon size={18} weight="fill" aria-hidden="true" />
@@ -178,10 +173,6 @@ function Home() {
         <div className="ogcr-home__hero-panel" aria-label="Activity workflow overview">
           <div className="ogcr-home__hero-panel-head">
             <Pill tone="neutral">Operator workflow</Pill>
-            <span className="ogcr-home__hero-panel-meta">
-              <TimerIcon size={16} weight="duotone" aria-hidden="true" />
-              Submission cycle ready
-            </span>
           </div>
           <div className="ogcr-home__hero-workflow">
             {workflow.map((step, index) => (
@@ -199,7 +190,7 @@ function Home() {
       </section>
 
       {/* ── Stats ── */}
-      <section className="ogcr-home__stats" aria-label="Platform statistics">
+      <section className="ogcr-home__stats" aria-label="Platform at a glance">
         {stats.map((s) => (
           <div key={s.label} className="ogcr-home__stat">
             <span className="ogcr-home__stat-icon" aria-hidden="true">{s.icon}</span>
@@ -213,10 +204,10 @@ function Home() {
       <section className="ogcr-home__features" aria-labelledby="features-heading">
         <header className="ogcr-home__section-header">
           <h2 id="features-heading" className="ogcr-home__section-title">
-            A dashboard shaped around real carbon activity work
+            Built around the way an activity reaches the registry
           </h2>
           <p className="ogcr-home__section-subtitle">
-            Give operators one place to move from onboarding activities to monitoring parcels and preparing submissions.
+            From a first draft to the certifier's verdict, each step has its place.
           </p>
         </header>
         <div className="ogcr-home__feature-grid">
@@ -235,10 +226,10 @@ function Home() {
       <section className="ogcr-home__highlights" aria-labelledby="highlights-heading">
         <header className="ogcr-home__section-header ogcr-home__section-header--left">
           <h2 id="highlights-heading" className="ogcr-home__section-title">
-            Purpose-built for GIS, activity tracking, and reporting
+            See where every activity stands
           </h2>
           <p className="ogcr-home__section-subtitle">
-            The platform is not just a landing page for activities — it is the operating layer that ties maps, workflows, and evidence together.
+            On the map, and across the whole portfolio.
           </p>
         </header>
         <div className="ogcr-home__highlight-grid">
@@ -264,17 +255,17 @@ function Home() {
       {/* ── CTA ── */}
       <section className="ogcr-home__cta" aria-labelledby="cta-heading">
         <h2 id="cta-heading" className="ogcr-home__cta-title">
-          Ready to run your carbon portfolio with more clarity?
+          Ready to prepare your first activity?
         </h2>
         <p className="ogcr-home__cta-subtitle">
-          Start with one activity or a full portfolio of farmer-linked parcels,
-          then scale monitoring and reporting from the same operator dashboard.
+          Sign in with your DCR account, or create one. You set up your operator
+          profile once, then add activities whenever you need.
         </p>
         <ul className="ogcr-home__cta-checks" aria-label="Key benefits">
           {[
-            "Multi-activity portfolio visibility",
-            "GIS-based parcel management",
-            "Submission-ready reporting workflows",
+            "Activities, parcels and documents in one place",
+            "Cadastre-based parcels on a map",
+            "Submission and outcome through DCR",
           ].map((item) => (
             <li key={item} className="ogcr-home__cta-check">
               <CheckCircleIcon size={18} weight="fill" aria-hidden="true" />
@@ -282,8 +273,8 @@ function Home() {
             </li>
           ))}
         </ul>
-        <Button variant="filled" tone="brand" endIcon={<ArrowRightIcon size={16} weight="bold" />}>
-          Open operator dashboard
+        <Button variant="filled" iconRight={<ArrowRightIcon size={16} weight="bold" />} onClick={onOpenLogin}>
+          Sign in to get started
         </Button>
       </section>
     </div>

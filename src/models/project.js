@@ -18,6 +18,7 @@ class Project extends Model {
     'media_links',
     'technologies_practices_processes',
     'cobenefits',
+    'sustainable_development_goals',
     'city',
     'country_code',
     'geometry',
@@ -57,7 +58,7 @@ class Project extends Model {
     assign(this, data, Project.READABLE);
 
     // List fields come back as arrays; keep them arrays even when absent.
-    ['media_links', 'technologies_practices_processes', 'cobenefits'].forEach((key) => {
+    ['media_links', 'technologies_practices_processes', 'cobenefits', 'sustainable_development_goals'].forEach((key) => {
       if (this[key] == null) this[key] = [];
     });
   }
@@ -80,11 +81,11 @@ class Project extends Model {
   get isEditable() {
     // `is_editable` is authoritative; fall back to the status for local drafts.
     if (this.is_editable != null) return this.is_editable;
-    return this.status === 'draft' || this.status === 'ready';
+    return ['draft', 'ready', 'changes_requested'].includes(this.status);
   }
 
   get isSubmitted() {
-    return ['submitted', 'accepted', 'rejected'].includes(this.status);
+    return ['submitted', 'changes_requested', 'accepted', 'rejected'].includes(this.status);
   }
 }
 

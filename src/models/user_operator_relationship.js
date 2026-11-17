@@ -6,7 +6,7 @@ class UserOperatorRelationship extends Model {
 
   static READABLE = [
     'id',
-    'user_id',
+    'user',
     'operator',
     'first_name',
     'last_name',

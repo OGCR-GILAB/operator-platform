@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { UploadSimpleIcon } from "@phosphor-icons/react";
-import Button from "../ui/Button";
-import Message from "../ui/Message";
-import Modal from "../ui/Modal";
-import Select from "../ui/Select";
-import TextField from "../ui/TextField";
+import { Button, Input, Message, Select } from "@majistudio/ogcr-design-system";
 import $documents, { DEFAULT_ALLOWED_EXTENSIONS, DEFAULT_MAX_SIZE_MB } from "../../services/$documents";
 import $projects from "../../services/$projects";
 import $parcels from "../../services/$parcels";
 import $reference from "../../services/$reference";
 import $auth from "../../services/$auth";
-import { toList } from "../../services/$api";
+import { otherFieldErrors, toList } from "../../services/$api";
+import Dialog from "../ui/Dialog";
 
 const attachOptions = [
   { value: "project", label: "An activity" },
@@ -20,6 +17,8 @@ const attachOptions = [
 /**
  * Upload is multipart: file, kind, title and exactly one of project / parcel.
  * `newVersionFor` switches the modal to `documents/{id}/versions/` instead.
+ *
+ * `defaultKind` preselects the kind, e.g. `ownership_proof` for a deed.
  *
  * `scopeParcels` pins the modal to one activity: the activity is fixed and the
  * parcel choice is limited to that activity's own parcels, so an upload started
@@ -32,6 +31,7 @@ function DocumentUploadModal({
   newVersionFor = null,
   defaultProject = "",
   defaultParcel = "",
+  defaultKind = "other",
   scopeParcels = null,
 }) {
   const isNewVersion = Boolean(newVersionFor);
@@ -40,7 +40,7 @@ function DocumentUploadModal({
 
   const [file, setFile] = useState(null);
   const [form, setForm] = useState({
-    kind: "other",
+    kind: defaultKind,
     title: "",
     description: "",
     attachTo: defaultParcel ? "parcel" : "project",
@@ -160,7 +160,9 @@ function DocumentUploadModal({
 
       const fields = $auth.getFieldErrors(err);
       setFieldErrors(fields);
-      setError(Object.keys(fields).length ? "" : $auth.getErrorMessage(err));
+      setError(Object.keys(fields).length
+        ? otherFieldErrors(fields, ["title", "kind"])
+        : $auth.getErrorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -171,37 +173,38 @@ function DocumentUploadModal({
     : [{ value: "other", label: "Other" }];
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={busy ? () => {} : onClose}
-      size="md"
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => { if (!open && !busy) onClose(); }}
+      size="m"
       title={isNewVersion ? "Upload a new version" : "Upload document"}
-      subtitle={isNewVersion
+      description={isNewVersion
         ? `${newVersionFor.title} — the current version is kept and superseded.`
         : "Documents are private: they are only ever fetched through the API."}
-      secondaryAction={{ label: "Cancel", onClick: onClose, disabled: busy }}
       primaryAction={{
         label: busy ? `Uploading… ${progress}%` : "Upload",
         onClick: handleUpload,
         disabled: busy || !file,
+        closeOnClick: false,
       }}
+      secondaryAction={{ label: "Cancel", disabled: busy }}
     >
       <div className="ogcr-form-stack">
         {Boolean(error) && (
-          <Message variant="error" floating title="Upload failed" description={error} onClose={() => setError("")} />
+          <Message state="error" type="floating" title="Upload failed" description={error} onDismiss={() => setError("")} />
         )}
 
-        <div className="flex flex-row items-center gap-2">
+        <div className="flex flex-row items-center gap-8">
           <Button
             variant="outlined"
-            size="sm"
+            size="s"
             disabled={busy}
-            startIcon={<UploadSimpleIcon size={16} />}
+            iconLeft={<UploadSimpleIcon size={16} />}
             onClick={() => fileInput.current?.click()}
           >
             Choose file
           </Button>
-          <span className="ogcr-input__helper">
+          <span className="text-s text-text-secondary">
             {file
               ? `${file.name} — ${(file.size / (1024 * 1024)).toFixed(2)} MB`
               : `Max ${limits.maxSizeMb} MB · ${limits.allowedExtensions.join(", ")}`}
@@ -218,7 +221,7 @@ function DocumentUploadModal({
 
         {!isNewVersion && (
           <>
-            <TextField
+            <Input
               required
               label="Title"
               placeholder="What is this document?"
@@ -229,12 +232,14 @@ function DocumentUploadModal({
             />
             <Select
               label="Kind"
-              value={form.kind}
+              value={form.kind || null}
               options={kindOptions}
-              onChange={(event) => setForm({ ...form, kind: event.target.value })}
-              helperText={fieldErrors.kind || ""}
+              onValueChange={(value) => setForm({ ...form, kind: value })}
+              helperText={fieldErrors.kind || (form.kind === "ownership_proof"
+                ? "Attach it to the parcel, then pick it as the supporting document in the parcel's Ownership dialog: it goes to DCR with the declared owner."
+                : "")}
             />
-            <TextField
+            <Input
               label="Description"
               placeholder="Optional"
               value={form.description}
@@ -242,9 +247,9 @@ function DocumentUploadModal({
             />
             <Select
               label="Attach to"
-              value={form.attachTo}
+              value={form.attachTo || null}
               options={attachOptions}
-              onChange={(event) => setForm({ ...form, attachTo: event.target.value })}
+              onValueChange={(value) => setForm({ ...form, attachTo: value })}
               helperText={isScoped
                 ? "A document belongs to exactly one record — this activity, or one of its parcels."
                 : "A document belongs to exactly one activity or one parcel."}
@@ -253,16 +258,16 @@ function DocumentUploadModal({
               isScoped ? null : (
                 <Select
                   label="Activity"
-                  value={form.project}
+                  value={form.project || null}
                   placeholder={projects.length ? "Select an activity" : "No activities yet"}
                   options={projects.map((project) => ({ value: String(project.id), label: project.name }))}
-                  onChange={(event) => setForm({ ...form, project: event.target.value })}
+                  onValueChange={(value) => setForm({ ...form, project: value })}
                 />
               )
             ) : (
               <Select
                 label="Parcel"
-                value={form.parcel}
+                value={form.parcel || null}
                 placeholder={parcels.length
                   ? "Select a parcel"
                   : (isScoped ? "This activity has no parcels yet" : "No parcels yet")}
@@ -270,13 +275,13 @@ function DocumentUploadModal({
                   value: String(parcel.id),
                   label: parcel.name || parcel.cadastral_reference || `Parcel ${parcel.id}`,
                 }))}
-                onChange={(event) => setForm({ ...form, parcel: event.target.value })}
+                onValueChange={(value) => setForm({ ...form, parcel: value })}
               />
             )}
           </>
         )}
       </div>
-    </Modal>
+    </Dialog>
   );
 }
 

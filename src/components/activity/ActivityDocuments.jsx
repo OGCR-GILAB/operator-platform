@@ -1,40 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ArrowClockwiseIcon,
   DownloadSimpleIcon,
+  EyeIcon,
   MagnifyingGlassIcon,
   UploadSimpleIcon,
-  XIcon,
 } from "@phosphor-icons/react";
-import Button from "../ui/Button";
-import Checkbox from "../ui/Checkbox";
+import { AlertDialog, Button, Checkbox, Input, Message, Select } from "@majistudio/ogcr-design-system";
 import DataTable from "../ui/DataTable";
-import Message from "../ui/Message";
-import Modal from "../ui/Modal";
-import Pill from "../ui/Pill";
-import Select from "../ui/Select";
-import TextField from "../ui/TextField";
 import ActivityTabHeader from "./ActivityTabHeader";
 import DocumentUploadModal from "../documents/DocumentUploadModal";
+import DocumentViewerModal from "../documents/DocumentViewerModal";
+import { previewKindOf } from "../documents/previewable";
 import { useActivity } from "./ActivityContext";
+import { SetupNextStep } from "./ActivitySetupGuide";
 import { useToast } from "../providers/ToastContext";
 import $documents from "../../services/$documents";
 import $projects from "../../services/$projects";
 import $reference from "../../services/$reference";
 import $auth from "../../services/$auth";
 import { toList } from "../../services/$api";
-import OGCRDocument, { syncStateOf } from "../../models/document";
-import { formatDate, syncLabel, syncTone } from "../projects/projectPresentation";
+import OGCRDocument from "../../models/document";
+import { formatDate, parcelLabelOf } from "../projects/projectPresentation";
 
-const forwardStatusOptions = [
-  { value: "", label: "Any DCR state" },
-  { value: "local", label: "Local only" },
-  { value: "forwarded", label: "Forwarded" },
-  { value: "failed", label: "Failed" },
-];
-
-const parcelLabelOf = (parcel) =>
-  parcel?.name || parcel?.cadastral_reference || (parcel?.id ? `Parcel ${parcel.id}` : "—");
+// The DS Select has no empty-string option; this stands in for "no kind filter".
+const ALL_KINDS = "all";
 
 /**
  * Every piece of evidence this activity relies on. A document hangs off either
@@ -42,7 +33,7 @@ const parcelLabelOf = (parcel) =>
  * are gathered here and shown as two groups rather than split across two tabs.
  */
 function ActivityDocuments() {
-  const { activityId, editable, reload: reloadActivity } = useActivity();
+  const { activityId, editable, documentsOpen, reload: reloadActivity } = useActivity();
   const { showToast } = useToast();
 
   const [activityDocs, setActivityDocs] = useState([]);
@@ -55,13 +46,20 @@ function ActivityDocuments() {
 
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState("");
-  const [forwardStatus, setForwardStatus] = useState("");
   const [allVersions, setAllVersions] = useState(false);
 
-  const [uploading, setUploading] = useState(false);
+  // `?upload=1` is the overview's setup guide asking for the upload form.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [uploading, setUploading] = useState(() => searchParams.has("upload") && documentsOpen);
   const [newVersionFor, setNewVersionFor] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [viewing, setViewing] = useState(null);
+
+  // Once read, the flag goes, so a reload or "Back" does not reopen the form.
+  useEffect(() => {
+    if (searchParams.has("upload")) setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const reload = useCallback(() => {
     setStatus("loading");
@@ -92,9 +90,9 @@ function ActivityDocuments() {
         const linkedParcels = links.map((link) => link.parcel_detail || { id: link.parcel });
 
         const [own, ...perParcel] = await Promise.all([
-          $documents.list({ project: activityId, ...params }),
+          $documents.listAll({ project: activityId, ...params }),
           ...linkedParcels.map((parcel) =>
-            $documents.list({ parcel: parcel.id, ...params }).catch(() => null)),
+            $documents.listAll({ parcel: parcel.id, ...params }).catch(() => null)),
         ]);
 
         if (cancelled) return;
@@ -159,7 +157,6 @@ function ActivityDocuments() {
   const applyFilters = useCallback(
     (rows) => rows.filter((row) => {
       if (kind && row.kind !== kind) return false;
-      if (forwardStatus && syncStateOf(row) !== forwardStatus) return false;
 
       if (search) {
         const needle = search.toLowerCase();
@@ -169,7 +166,7 @@ function ActivityDocuments() {
 
       return true;
     }),
-    [kind, forwardStatus, search],
+    [kind, search],
   );
 
   const visibleActivityDocs = useMemo(() => applyFilters(activityDocs), [applyFilters, activityDocs]);
@@ -177,7 +174,19 @@ function ActivityDocuments() {
 
   const baseColumns = useMemo(
     () => [
-      { id: "title", accessorKey: "title", header: "Title" },
+      {
+        id: "title",
+        accessorKey: "title",
+        header: "Title",
+        // A previewable file opens from its title, the way a link would.
+        cell: ({ row, getValue }) => (previewKindOf(row.original) ? (
+          <button type="button" className="ogcr-doc-link" onClick={() => setViewing(row.original)}>
+            {getValue() || row.original.original_name || "Untitled"}
+          </button>
+        ) : (
+          <span>{getValue() || row.original.original_name || "Untitled"}</span>
+        )),
+      },
       {
         id: "kind",
         accessorKey: "kind",
@@ -202,12 +211,6 @@ function ActivityDocuments() {
         cell: ({ row }) => <span>{row.original.sizeLabel || "—"}</span>,
       },
       {
-        id: "sync",
-        accessorFn: (row) => syncStateOf(row),
-        header: "DCR",
-        cell: ({ row }) => <Pill tone={syncTone(row.original)}>{syncLabel(row.original)}</Pill>,
-      },
-      {
         id: "uploaded",
         accessorKey: "uploaded_at",
         header: "Uploaded",
@@ -219,40 +222,51 @@ function ActivityDocuments() {
         header: "",
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="flex flex-row gap-1">
+          <div className="flex flex-row gap-4">
+            {previewKindOf(row.original) && (
+              <Button
+                variant="text"
+                size="s"
+                iconLeft={<EyeIcon size={16} />}
+                onClick={() => setViewing(row.original)}
+              >
+                View
+              </Button>
+            )}
             <Button
               variant="text"
-              size="sm"
+              size="s"
               disabled={downloadingId === row.original.id}
-              startIcon={<DownloadSimpleIcon size={16} />}
+              iconLeft={<DownloadSimpleIcon size={16} />}
               onClick={() => handleDownload(row.original)}
             >
               {downloadingId === row.original.id ? "…" : "Download"}
             </Button>
             <Button
               variant="text"
-              size="sm"
-              disabled={row.original.is_frozen || !editable}
+              size="s"
+              disabled={row.original.is_frozen || !documentsOpen}
               onClick={() => setNewVersionFor(row.original)}
             >
               New version
             </Button>
-            <Button
-              variant="text"
-              size="sm"
-              tone="warning"
-              disabled={row.original.is_frozen || !editable}
-              onClick={() => setDeleting(row.original)}
-            >
-              Delete
-            </Button>
+            {/* The API refuses deletes once the activity is submitted (409). */}
+            {row.original.is_deletable !== false && !row.original.is_frozen && editable && (
+              <Button
+                variant="text"
+                size="s"
+                onClick={() => setDeleting(row.original)}
+              >
+                Delete
+              </Button>
+            )}
           </div>
         ),
       },
     ],
     // handleDownload closes over `downloadingId`, which is in the deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [kindLabels, downloadingId, editable],
+    [kindLabels, downloadingId, editable, documentsOpen],
   );
 
   // The parcel group needs one column the activity group does not.
@@ -265,7 +279,7 @@ function ActivityDocuments() {
     [baseColumns],
   );
 
-  const hasFilters = Boolean(search || kind || forwardStatus);
+  const hasFilters = Boolean(search || kind);
 
   return (
     <div className="ogcr-activity-tab">
@@ -273,14 +287,13 @@ function ActivityDocuments() {
         description="Evidence attached to this activity and to its parcels"
         actions={(
           <>
-            <Button variant="text" onClick={reload} startIcon={<ArrowClockwiseIcon size={16} />}>
+            <Button variant="text" onClick={reload} iconLeft={<ArrowClockwiseIcon size={16} />}>
               Refresh
             </Button>
             <Button
               variant="filled"
-              tone="brand"
-              startIcon={<UploadSimpleIcon size={16} weight="bold" />}
-              disabled={!editable}
+              iconLeft={<UploadSimpleIcon size={16} weight="bold" />}
+              disabled={!documentsOpen}
               onClick={() => setUploading(true)}
             >
               Upload Document
@@ -289,16 +302,18 @@ function ActivityDocuments() {
         )}
       />
 
-      {editable && (
+      {documentsOpen && (
         <Message
-          variant="info"
-          title="Documents travel with the submission"
-          description="On submit, every current document on this activity and its parcels is attached to the parcel–activity verification, including ownership proofs. Upload what the verifiers need before you submit — files added afterwards are not part of it."
+          state="neutral"
+          title="Documents stay on this platform"
+          description="Documents stay on the Operator Platform; certifiers fetch them from here during the audit, ownership proofs included. Upload them before the activity is assigned to an auditor."
         />
       )}
 
+      <SetupNextStep covers={["documents"]} />
+
       {Boolean(error) && (
-        <Message variant="error" title="Could not load documents" description={error} onClose={() => setError("")} />
+        <Message state="error" title="Could not load documents" description={error} onDismiss={() => setError("")} />
       )}
 
       {/*
@@ -307,59 +322,35 @@ function ActivityDocuments() {
         rebuild it. Only the rows below are unknown, and they say so in place.
       */}
       <section className="ogcr-projects__table-section">
-        {/* Same toolbar as the activities list: search, then the state
-            filter as chips. It filters both tables below. */}
+        {/* Same toolbar as the activities list. It filters both tables below. */}
         <div className="ogcr-projects__toolbar">
-          <TextField
+          <Input
             className="ogcr-projects__search"
+            type="search"
             value={search}
             placeholder="Search documents by title or description…"
             aria-label="Search documents"
-            startIcon={<MagnifyingGlassIcon size={16} />}
-            endIcon={search ? (
-              <button
-                type="button"
-                className="ogcr-projects__search-clear"
-                aria-label="Clear search"
-                onClick={() => setSearch("")}
-              >
-                <XIcon size={14} weight="bold" />
-              </button>
-            ) : null}
+            iconLeft={<MagnifyingGlassIcon size={16} />}
             onChange={(event) => setSearch(event.target.value)}
           />
-
-          <div className="ogcr-projects__view-toggle" role="group" aria-label="Filter by DCR state">
-            {forwardStatusOptions.map((option) => (
-              <button
-                key={option.value || "any"}
-                type="button"
-                className={`ogcr-projects__view-btn${forwardStatus === option.value ? " active" : ""}`}
-                aria-pressed={forwardStatus === option.value}
-                onClick={() => setForwardStatus(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
 
           {/* Kinds come from the API and there are eight of them — too many
               for chips, so this one stays a select. */}
           <Select
             className="ogcr-projects__toolbar-select"
-            value={kind}
+            value={kind || ALL_KINDS}
             aria-label="Filter by kind"
             options={[
-              { value: "", label: "All kinds" },
+              { value: ALL_KINDS, label: "All kinds" },
               ...kinds.map((item) => ({ value: item.value, label: item.label })),
             ]}
-            onChange={(event) => setKind(event.target.value)}
+            onValueChange={(value) => setKind(value === ALL_KINDS ? "" : value)}
           />
 
           <Checkbox
             label="Superseded"
             checked={allVersions}
-            onChange={(event) => { setStatus("loading"); setAllVersions(event.target.checked); }}
+            onCheckedChange={(checked) => { setStatus("loading"); setAllVersions(checked); }}
           />
         </div>
 
@@ -402,7 +393,7 @@ function ActivityDocuments() {
           scopeParcels={parcels}
           onClose={() => setUploading(false)}
           onUploaded={() => {
-            showToast({ variant: "success", title: "Document uploaded", description: "It will be attached to the DCR verification when this activity is submitted." });
+            showToast({ variant: "success", title: "Document uploaded", description: "Certifiers fetch it from here during the audit." });
             reload();
             reloadActivity();
           }}
@@ -422,18 +413,27 @@ function ActivityDocuments() {
         />
       )}
 
+      {viewing && (
+        <DocumentViewerModal
+          key={viewing.id}
+          document={viewing}
+          kindLabel={kindLabels[viewing.kind] || viewing.kind}
+          onClose={() => setViewing(null)}
+        />
+      )}
+
       {deleting && (
-        <Modal
-          isOpen
-          onClose={() => setDeleting(null)}
-          size="sm"
+        <AlertDialog
+          open
+          onOpenChange={(open) => { if (!open) setDeleting(null); }}
+          tone="danger"
           title="Delete this document?"
-          subtitle="This cannot be undone. Documents on a submitted activity are frozen."
-          secondaryAction={{ label: "Cancel", onClick: () => setDeleting(null) }}
-          primaryAction={{ label: "Delete", onClick: handleDelete, tone: "warning" }}
+          description="This cannot be undone. Documents on a submitted activity are frozen."
+          confirmLabel="Delete"
+          onConfirm={handleDelete}
         >
           <p className="text-body-s">{deleting.title}</p>
-        </Modal>
+        </AlertDialog>
       )}
     </div>
   );

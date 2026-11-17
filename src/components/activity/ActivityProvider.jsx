@@ -12,6 +12,7 @@ const emptyScope = {
   forId: null,
   activity: null,
   readiness: null,
+  parcels: null,
   error: "",
   notFound: false,
 };
@@ -38,14 +39,18 @@ function ActivityProvider({ children }) {
     let cancelled = false;
 
     // Readiness is advisory — a submitted activity has no pending checks worth
-    // blocking the workspace on, so a failure there is soft.
+    // blocking the workspace on, so a failure there is soft. So are the parcels:
+    // they only name parcels and count their documents, which the activity's
+    // own `document_count` leaves out.
     Promise.all([
       $projects.get(activityId),
       $projects.readiness(activityId).catch(() => null),
+      $projects.allParcels(activityId).catch(() => null),
     ])
-      .then(([activity, readiness]) => {
+      .then(([activity, readiness, links]) => {
         if (cancelled) return;
-        setScope({ forId: activityId, activity, readiness, error: "", notFound: false });
+        const parcels = links ? links.map((link) => link.parcel_detail || { id: link.parcel }) : null;
+        setScope({ forId: activityId, activity, readiness, parcels, error: "", notFound: false });
       })
       .catch((err) => {
         if (cancelled || err?.response?.status === 401) return;
@@ -54,6 +59,7 @@ function ActivityProvider({ children }) {
           forId: activityId,
           activity: null,
           readiness: null,
+          parcels: null,
           error: $auth.getErrorMessage(err),
           notFound: err?.response?.status === 404,
         });
@@ -72,12 +78,28 @@ function ActivityProvider({ children }) {
       ? "idle"
       : (current.forId !== activityId ? "loading" : (current.activity ? "ready" : "error"));
 
+    const ownDocuments = Number(current.activity?.document_count) || 0;
+
     return {
       activityId,
       activity: current.activity,
       readiness: current.readiness,
+      // The parcel records (`parcel_detail`), or null if they could not be read.
+      parcels: current.parcels,
+      // Documents on the activity and on its parcels; the activity's own count
+      // alone until the parcels are known.
+      documentTotal: ownDocuments + (current.parcels || [])
+        .reduce((sum, parcel) => sum + (Number(parcel.document_count) || 0), 0),
       // A submitted activity is read-only; absent the flag, assume editable.
       editable: current.activity ? current.activity.is_editable !== false : false,
+      // Documents outlive that: uploads and new versions stay open after submit
+      // until the verification is final (accepted / rejected). A certificate in
+      // force freezes them per document (`is_frozen`), and the API answers 400
+      // if the activity is closed after all.
+      documentsOpen: current.activity
+        ? current.activity.is_editable !== false
+          || ["submitted", "changes_requested"].includes(current.activity.status)
+        : false,
       status,
       error: current.error,
       notFound: current.notFound,

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BroomIcon, CheckCircleIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
-import Button from "../ui/Button";
-import TextField from "../ui/TextField";
+import { Button, FormFieldset, Input } from "@majistudio/ogcr-design-system";
 import Loader from "../ui/Loader";
 import $map from "../../services/$map";
 import $cadastre, { parcelId, parcelLabel } from "../../services/$cadastre";
@@ -247,28 +246,28 @@ function ParcelCadastrePicker({ value, onChange, disabled = false, error }) {
     || "Search by cadastral reference, or zoom in and click a parcel on the map.";
 
   return (
-    <div className={`ogcr-parcel-picker${problem || error ? " ogcr-input--error" : ""}`}>
-      <span className="ogcr-input__label">
-        Parcel
-        <span className="text-negative" aria-hidden="true"> *</span>
-      </span>
-
+    <FormFieldset
+      legend="Parcel"
+      required
+      error={Boolean(problem || error)}
+      helperText={error || helper}
+    >
       <form className="ogcr-parcel-picker__filters" onSubmit={handleSubmit}>
-        <TextField
+        <Input
           label="Code INSEE"
           placeholder="e.g., 59350"
           value={fields.code_insee}
           disabled={locked}
           onChange={handleFieldChange("code_insee")}
         />
-        <TextField
+        <Input
           label="Section"
           placeholder="e.g., AB"
           value={fields.section}
           disabled={locked}
           onChange={handleFieldChange("section")}
         />
-        <TextField
+        <Input
           label="Numéro"
           placeholder="e.g., 1"
           value={fields.numero}
@@ -278,9 +277,8 @@ function ParcelCadastrePicker({ value, onChange, disabled = false, error }) {
         <div className="ogcr-parcel-picker__filters-actions">
           <Button
             type="submit"
-            tone="brand"
             disabled={locked || searching || !fields.code_insee.trim()}
-            startIcon={searching
+            iconLeft={searching
               ? <Loader variant="spinner" size="s" label="Searching the cadastre" />
               : <MagnifyingGlassIcon size={16} weight="bold" />}
           >
@@ -290,7 +288,7 @@ function ParcelCadastrePicker({ value, onChange, disabled = false, error }) {
             type="button"
             variant="outlined"
             disabled={locked || searching}
-            startIcon={<BroomIcon size={16} weight="bold" />}
+            iconLeft={<BroomIcon size={16} weight="bold" />}
             onClick={handleClear}
           >
             Clear
@@ -300,11 +298,9 @@ function ParcelCadastrePicker({ value, onChange, disabled = false, error }) {
 
       <div ref={mapElement} className="ogcr-map-shell ogcr-parcel-picker__map" />
 
-      <p className="ogcr-input__helper">{error || helper}</p>
-
       {isConfirmed ? (
         <div className="ogcr-parcel-picker__summary">
-          <div className="flex flex-row items-center gap-2">
+          <div className="flex flex-row items-center gap-8">
             <CheckCircleIcon size={18} weight="fill" />
             <span className="ogcr-parcel-picker__summary-title">
               {value.label || value.idu || "Parcel selected"}
@@ -324,17 +320,16 @@ function ParcelCadastrePicker({ value, onChange, disabled = false, error }) {
         <div className="ogcr-parcel-picker__actions">
           <Button
             variant="filled"
-            tone="brand"
             disabled={disabled}
-            startIcon={<CheckCircleIcon size={16} weight="bold" />}
+            iconLeft={<CheckCircleIcon size={16} weight="bold" />}
             onClick={handleConfirm}
           >
             Confirm selection
           </Button>
-          <span className="ogcr-input__helper">{parcelLabel(selected)}</span>
+          <span className="text-s text-text-secondary">{parcelLabel(selected)}</span>
         </div>
       )}
-    </div>
+    </FormFieldset>
   );
 }
 

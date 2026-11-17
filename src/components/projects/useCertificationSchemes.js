@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import $auth from "../../services/$auth";
 import { toList } from "../../services/$api";
-import { certificationSchemes as fallbackSchemes } from "./activityConfig";
 
 /**
  * `GET auth/dcr/certification-schemes/` returns a bare array of
@@ -28,16 +27,17 @@ export const toSchemeOptions = (schemes) =>
     .filter(Boolean);
 
 /**
- * The scheme list, with the hard-coded fallback standing in until the API
- * answers. `allSamples` is true when nothing real came back, which is worth
- * saying out loud — DCR does not publish its schemes yet, and an account
- * without the `reference` capability sees the same thing.
+ * The scheme list from the API. There is deliberately no hard-coded fallback:
+ * whatever is picked here is sent as `certification_scheme_id`, the field DCR
+ * matches on, so an invented id would register the activity under a scheme
+ * that does not exist. `allSamples` is true when nothing real came back, which
+ * is worth saying out loud — DCR does not publish its schemes yet, and an
+ * account without the `reference` capability sees the same thing.
  */
 export default function useCertificationSchemes({ enabled = true } = {}) {
-  const [options, setOptions] = useState(() => fallbackSchemes.map(
-    (scheme) => ({ ...scheme, source: null }),
-  ));
+  const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -47,13 +47,15 @@ export default function useCertificationSchemes({ enabled = true } = {}) {
     $auth.certificationSchemes()
       .then((schemes) => {
         if (cancelled) return;
-        const loaded = toSchemeOptions(schemes);
-        if (loaded.length) setOptions(loaded);
+        setOptions(toSchemeOptions(schemes));
+        setFailed(false);
         setLoading(false);
       })
       .catch(() => {
-        // Keep the fallback list; the user can still pick something.
-        if (!cancelled) setLoading(false);
+        // The scheme is optional and can be set later, so this is not fatal.
+        if (cancelled) return;
+        setFailed(true);
+        setLoading(false);
       });
 
     return () => { cancelled = true; };
@@ -61,5 +63,14 @@ export default function useCertificationSchemes({ enabled = true } = {}) {
 
   const allSamples = options.length > 0 && options.every((option) => option.source === "sample");
 
-  return { options, loading, allSamples };
+  return { options, loading, failed, allSamples };
+}
+
+/** One helper line for every scheme select, so the wording stays in step. */
+export function schemeHelperText({ loading, failed, allSamples, options }) {
+  if (loading) return "Loading schemes from DCR… Optional — it can be set later.";
+  if (failed) return "Schemes could not be loaded. Optional — it can be set later.";
+  if (!options.length) return "DCR lists no schemes yet. Optional — it can be set later.";
+  if (allSamples) return "Sample schemes are placeholders — DCR does not publish its schemes yet. Optional; it can be set later.";
+  return "Loaded from DCR. Optional — it can be set later.";
 }

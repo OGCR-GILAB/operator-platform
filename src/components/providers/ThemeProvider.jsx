@@ -12,17 +12,25 @@ export const ThemeProvider = ({ children }) => {
 
   useEffect(() => {
     const root = window.document.documentElement;
-    const isDark =
-      theme === "dark" ||
-      (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
 
-    root.classList.toggle("dark", isDark);
+    // The design system reads its dark palette from data-theme on <html>.
+    const apply = () => {
+      const isDark = theme === "dark" || (theme === "system" && media.matches);
+      root.dataset.theme = isDark ? "dark" : "light";
+    };
+
+    apply();
 
     try {
       localStorage.setItem("theme", theme);
     } catch {
       // noop
     }
+
+    if (theme !== "system") return undefined;
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
   }, [theme]);
 
   return (

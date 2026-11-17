@@ -112,7 +112,7 @@ export const TREE_COVER_LOSS_LEGEND = {
 export const PARCEL_LEGEND = {
   items: [
     { color: '#2e7d5b', label: 'Synced with DCR' },
-    { color: '#c98a2e', label: 'Local only' },
+    { color: '#c98a2e', label: 'Local, or waiting for registration' },
     { color: '#b4453c', label: 'Sync failed' },
   ],
 };

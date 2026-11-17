@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
-import Switch from "../ui/Switch";
-import Pill from "../ui/Pill";
-import { formatArea, syncLabel, syncTone } from "../projects/projectPresentation";
+import { Pill, Switch } from "@majistudio/ogcr-design-system";
+import { formatArea, parcelSyncLabel, parcelSyncTone } from "../projects/projectPresentation";
 import { parcelKey } from "../../services/$map";
 import { LAYER_GROUPS, OVERLAY_LAYERS } from "../../services/mapLayers";
 
@@ -50,6 +49,7 @@ function ActivityMapDrawer(props) {
     overlays = {},
     onOverlay = () => {},
     parcels = [],
+    submitted = false,
     selectedParcelId = null,
     onSelectParcel = () => {},
     onHoverParcel = () => {},
@@ -113,9 +113,9 @@ function ActivityMapDrawer(props) {
         <section className="ogcr-map-drawer__section">
           <Switch
             label="Parcels"
-            description="This activity's land, coloured by DCR state."
+            secondaryText="This activity's land, coloured by DCR state."
             checked={parcelsVisible}
-            onChange={(event) => onParcelsVisible(event.target.checked)}
+            onCheckedChange={onParcelsVisible}
           />
         </section>
 
@@ -128,9 +128,9 @@ function ActivityMapDrawer(props) {
               <Switch
                 key={overlay.id}
                 label={overlay.label}
-                description={overlay.description}
+                secondaryText={overlay.description}
                 checked={Boolean(overlays[overlay.id])}
-                onChange={(event) => onOverlay(overlay.id, event.target.checked)}
+                onCheckedChange={(checked) => onOverlay(overlay.id, checked)}
               />
             ))}
           </section>
@@ -185,7 +185,9 @@ function ActivityMapDrawer(props) {
                   >
                     <span className="ogcr-map-parcel__top">
                       <span className="ogcr-map-parcel__name">{parcelName(feature)}</span>
-                      <Pill tone={syncTone(properties)} label={syncLabel(properties)} />
+                      <Pill tone={parcelSyncTone(properties, { submitted })}>
+                        {parcelSyncLabel(properties, { submitted })}
+                      </Pill>
                     </span>
                     <span className="ogcr-map-parcel__meta">
                       {properties.cadastral_reference || "No reference"}

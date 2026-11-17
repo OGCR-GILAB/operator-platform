@@ -14,6 +14,12 @@ class Parcel extends Model {
     'id',
     'area_ha',
     'has_owner_verification',
+    'has_owner',
+    // `true` / `false`, `null` while nothing is declared.
+    'owner_is_complete',
+    // The declared owner against the land registry, as `registry-owners` ->
+    // `matches_declared`: `true` / `false`, `null` when there is nothing to compare.
+    'registry_match',
     'project_count',
     'document_count',
     'operator_name',
@@ -61,9 +67,11 @@ class Parcel extends Model {
 
 /** The join row from `projects/{id}/parcels/`. */
 export class ProjectParcel extends Model {
-  // On DCR the link is a bare `parcel_activity` — no status, no amount. Each
-  // parcel's verification comes back through `projects/{id}/dcr-status/`.
-  static WRITABLE = ['parcel', 'amount', 'status_message'];
+  // We no longer write DCR's `parcel_activity`: after a submit the certification
+  // platform registers the parcels on DCR itself and the next status refresh
+  // matches them by cadastral reference. Each parcel's verification comes back
+  // through `projects/{id}/dcr-status/`.
+  static WRITABLE = ['parcel'];
 
   static READABLE = [
     'id',
@@ -105,12 +113,54 @@ export class OwnerVerification extends Model {
     'updated_at',
   ];
 
+  // What the operator can set. A verdict mirrored from DCR may also be
+  // `pending` or `under_review` (`VERIFICATION_STATUSES` in services/$reference).
   static STATUS_CODES = ['in_progress', 'verified', 'failed'];
 
   constructor(data = {}) {
     super();
     assign(this, data, OwnerVerification.WRITABLE);
     assign(this, data, OwnerVerification.READABLE);
+  }
+}
+
+/**
+ * `parcels/{id}/owner/` — DCR's `parcel_owner`: who owns the parcel, as the
+ * operator declares it, with the deed or cadastre extract behind it. `404`
+ * while none is declared. Editable until the parcel's verification is final
+ * (`409` after that), so also after submit and once the parcel is registered.
+ */
+export class ParcelOwner extends Model {
+  static WRITABLE = ['legal_name', 'owner_type', 'country_code', 'document'];
+
+  static READABLE = [
+    'id',
+    'document_title',
+    'is_complete',
+    'dcr_id',
+    'dcr_sync_status',
+    'dcr_synced_at',
+    'supporting_document_dcr_id',
+    'created_at',
+    'updated_at',
+  ];
+
+  static REQUIRED = ['legal_name', 'owner_type', 'country_code'];
+
+  static OWNER_TYPES = ['natural_person', 'legal_person', 'public_entity'];
+
+  // The document kinds that can back a declaration.
+  static PROOF_KINDS = ['ownership_proof', 'cadastral_extract'];
+
+  constructor(data = {}) {
+    super();
+    assign(this, data, ParcelOwner.WRITABLE);
+    assign(this, data, ParcelOwner.READABLE);
+  }
+
+  /** `compact` would drop a cleared document; `null` is how it is cleared. */
+  toPayload() {
+    return { ...super.toPayload(), document: this.document ?? null };
   }
 }
 

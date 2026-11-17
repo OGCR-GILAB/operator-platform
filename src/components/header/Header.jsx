@@ -8,11 +8,20 @@ import {
   MapTrifoldIcon,
   SquaresFourIcon,
 } from "@phosphor-icons/react";
-import { useMemo } from "react";
-import Navigation from "../ui/Navigation";
+import { useMemo, useSyncExternalStore } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { SideNavigation } from "@majistudio/ogcr-design-system";
 import { useGlobal } from "../providers/GlobalContext";
 import { useActivity } from "../activity/ActivityContext";
-import { useLocation, useNavigate } from "react-router-dom";
+
+// Below the DS tablet breakpoint the sidebar folds into its mobile drawer.
+const MOBILE_QUERY = "(max-width: 640px)";
+const subscribeMobile = (onChange) => {
+  const media = window.matchMedia(MOBILE_QUERY);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+};
+const isMobileNow = () => window.matchMedia(MOBILE_QUERY).matches;
 
 /**
  * The sidebar has two shapes. Outside an activity it offers the two global
@@ -20,10 +29,10 @@ import { useLocation, useNavigate } from "react-router-dom";
  * always tell which activity they are working on and how to get back out.
  */
 function Header() {
-  const navigate = useNavigate();
   const { pathname } = useLocation();
+  const mobile = useSyncExternalStore(subscribeMobile, isMobileNow);
   const { loggedIn } = useGlobal();
-  const { activityId, activity } = useActivity();
+  const { activityId, activity, documentTotal } = useActivity();
 
   const inActivity = Boolean(activityId);
 
@@ -51,7 +60,7 @@ function Header() {
           path: `${base}/documents`,
           label: "Documents",
           icon: <FileTextIcon />,
-          badge: activity?.document_count || undefined,
+          badge: documentTotal || undefined,
         },
         { id: "activity-map", path: `${base}/map`, label: "Map", icon: <MapTrifoldIcon /> },
       ];
@@ -61,7 +70,7 @@ function Header() {
       { id: "overview", path: "/overview", label: "Overview", icon: <SquaresFourIcon /> },
       { id: "activities", path: "/activities", label: "Activities", icon: <FolderIcon /> },
     ];
-  }, [loggedIn, inActivity, activityId, activity?.parcel_count, activity?.document_count]);
+  }, [loggedIn, inActivity, activityId, activity?.parcel_count, documentTotal]);
 
   // The URL is the single source of truth — the longest matching path wins, so
   // `/activities/7/parcels` highlights Parcels rather than All activities.
@@ -85,13 +94,19 @@ function Header() {
   }, [pathname, inActivity, activity?.name]);
 
   return (
-    <Navigation
-      placement="side"
-      brandName={brandName}
-      items={navigationItems}
-      activeItem={activeItem}
-      onItemSelect={(item) => navigate(item.path)}
-      ariaLabel="Side navigation"
+    <SideNavigation
+      aria-label="Side navigation"
+      product={brandName ?? undefined}
+      layout={mobile ? "mobile" : "desktop"}
+      activeId={activeItem ?? ""}
+      // Router links, so items are real anchors and navigate without a reload.
+      items={navigationItems.map(({ id, path, label, icon, badge }) => ({
+        id,
+        label,
+        icon,
+        badge,
+        render: <Link to={path} />,
+      }))}
     />
   );
 }

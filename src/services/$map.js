@@ -2,10 +2,8 @@ import axios from "axios";
 import maplibregl, {
   AttributionControl,
   FullscreenControl,
-  LngLat,
   NavigationControl,
 } from "maplibre-gl";
-import * as turf from '@turf/turf';
 import moment from "moment";
 import { OVERLAY_LAYERS } from "./mapLayers";
 
@@ -31,6 +29,20 @@ export const parcelKey = (feature) => {
   const id = feature?.properties?.id ?? feature?.id;
   return id === null || id === undefined ? '' : String(id);
 };
+
+/**
+ * `parcels/geojson/` puts the parcel id on the feature, not in `properties`.
+ * `promoteId: 'id'` only reads `properties.id`, so without this copy no
+ * feature has an id and every selected / hover state is silently dropped.
+ */
+export const withParcelIds = (featureCollection) => ({
+  ...featureCollection,
+  features: (featureCollection?.features || []).map((feature) => {
+    const id = feature?.properties?.id ?? feature?.id;
+    if (id === null || id === undefined) return feature;
+    return { ...feature, id, properties: { ...feature.properties, id } };
+  }),
+});
 
 class $map {
   constructor() {
@@ -249,8 +261,6 @@ class $map {
       if (id === undefined || id === null) return;
 
       if (id !== hoveredId) {
-        const centroid = turf.centroid(feature);
-        const rect = this.instance.getCanvas().getBoundingClientRect();
         this.popup.setLngLat(this.instance.unproject([0, 0])).setHTML(this.createZoneHtml(feature.properties)).addTo(this.instance);
       }
 
@@ -300,8 +310,6 @@ class $map {
       if (id === undefined || id === null) return;
 
       if (id !== hoveredId) {
-        const centroid = turf.centroid(feature);
-        const rect = this.instance.getCanvas().getBoundingClientRect();
         this.popup.setLngLat(this.instance.unproject([0, 0])).setHTML(this.createParcelHtml(feature.properties)).addTo(this.instance);
       }
 
@@ -343,7 +351,7 @@ class $map {
   setOperatorParcels(featureCollection) {
     if (!this.instance) return;
 
-    const data = featureCollection || { type: 'FeatureCollection', features: [] };
+    const data = withParcelIds(featureCollection || { type: 'FeatureCollection', features: [] });
 
     const existing = this.instance.getSource(OPERATOR_PARCELS_SOURCE);
     if (existing) {
@@ -397,6 +405,7 @@ class $map {
         "line-color": [
           "case",
           ["boolean", ["feature-state", "selected"], false], "#1b1b1b",
+          ["boolean", ["feature-state", "hover"], false], "#5a5a5a",
           "#FFFFFF"
         ],
         "line-width": [
@@ -417,7 +426,27 @@ class $map {
       }
     });
 
+    this.setOperatorParcelHoverEvent();
     this.restoreParcelState();
+  }
+
+  /**
+   * Pointing at a parcel on the map marks it the way pointing at its row in the
+   * drawer does. The layers are added once per map, so this is registered once.
+   */
+  setOperatorParcelHoverEvent() {
+    this.instance.on('mousemove', 'operator-parcels-fill', (e) => {
+      const id = e.features?.[0]?.id;
+      if (id === undefined || id === null) return;
+
+      this.instance.getCanvas().style.cursor = 'pointer';
+      if (String(id) !== this.hoveredParcelId) this.setHoveredParcel(id);
+    });
+
+    this.instance.on('mouseleave', 'operator-parcels-fill', () => {
+      this.instance.getCanvas().style.cursor = '';
+      this.setHoveredParcel(null);
+    });
   }
 
   /** Re-apply the current hover/selection after the source data is replaced. */

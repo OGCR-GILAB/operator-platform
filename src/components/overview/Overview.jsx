@@ -1,22 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowClockwiseIcon,
   ArrowRightIcon,
   CalendarDotsIcon,
+  CertificateIcon,
+  ClipboardTextIcon,
   ClockCountdownIcon,
+  PaperPlaneTiltIcon,
   ShieldCheckIcon,
-  IdentificationCardIcon,
-  FileIcon,
 } from "@phosphor-icons/react";
 import { useNavigate } from "react-router-dom";
 import { useGlobal } from "../providers/GlobalContext";
-import Button from "../ui/Button";
-import Card from "../ui/Card";
+import { Button, Card, Message, Pill, ProgressBar, Select } from "@majistudio/ogcr-design-system";
 import DataTable from "../ui/DataTable";
-import Message from "../ui/Message";
-import Pill from "../ui/Pill";
-import ProgressBar from "../ui/ProgressBar";
-import Select from "../ui/Select";
 import StatStrip from "../ui/StatStrip";
 import { SkeletonStats } from "../ui/Skeleton";
 import $projects from "../../services/$projects";
@@ -24,11 +20,15 @@ import $parcels from "../../services/$parcels";
 import $auth from "../../services/$auth";
 import {
   PROJECT_STATUS_LABELS,
+  formatDateTime,
+  formatRelative,
   localCompleteness,
   projectLocation,
   projectStatusTone,
   syncLabel,
   syncTone,
+  verificationLabel,
+  verificationTone,
 } from "../projects/projectPresentation";
 import { syncStateOf } from "../../models/document";
 
@@ -38,16 +38,35 @@ const scopeOptions = [
   { value: "submitted", label: "With DCR" },
 ];
 
-/** What is still missing before an activity can be submitted. */
+const AMENDMENT_CODES = ["validation_amendment_required", "verification_amendment_required"];
+
+/** Can still be changed here: a draft, or one the certifier sent back. */
+const isEditable = (project) => project.is_editable !== false
+  && !["submitted", "accepted", "rejected"].includes(project.status);
+
+/** Has been submitted at least once, so DCR and the certifier have it. */
+const isWithDcr = (project) => Boolean(project.submitted_at);
+
+/** The activity-level verification code `dcr-status` last read from DCR. */
+const verificationCodeOf = (project) => project.dcr_verification?.status_code || "";
+
+/** The certifier asked for changes, by status or by the verification code. */
+const changesRequested = (project) => project.status === "changes_requested"
+  || AMENDMENT_CODES.includes(verificationCodeOf(project));
+
+/**
+ * What is still missing before an activity can be submitted — the required
+ * steps of the setup guide. Documents are recommended there, not required.
+ */
 function missingPieces(project) {
   const missing = [];
 
   if (!project.start_date || !project.end_date) missing.push("dates");
   if (!project.type && !project.unit_types) missing.push("type");
+  if (!project.country_code) missing.push("country");
   if (!project.has_plan) missing.push("activity plan");
   if (!project.has_monitoring_plan) missing.push("monitoring plan");
   if (!Number(project.parcel_count)) missing.push("parcels");
-  if (!Number(project.document_count)) missing.push("documents");
 
   return missing;
 }
@@ -58,7 +77,7 @@ function Overview() {
   const certificationRef = useRef(null);
 
   const [projects, setProjects] = useState([]);
-  const [totalAreaHa, setTotalAreaHa] = useState(0);
+  const [parcels, setParcels] = useState([]);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [scope, setScope] = useState("all");
@@ -68,6 +87,11 @@ function Overview() {
     setStatus("loading");
     setReloadToken((current) => current + 1);
   };
+
+  const openActivity = useCallback(
+    (activityId) => navigate(`/activities/${activityId}/overview`),
+    [navigate],
+  );
 
   const scrollToCertification = () => {
     certificationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -84,7 +108,7 @@ function Overview() {
       .then(([projectRows, parcelRows]) => {
         if (cancelled) return;
         setProjects(projectRows);
-        setTotalAreaHa(parcelRows.reduce((sum, parcel) => sum + (Number(parcel.area_ha) || 0), 0));
+        setParcels(parcelRows);
         setError("");
         setStatus("ready");
       })
@@ -103,38 +127,31 @@ function Overview() {
     return "Operator";
   }, [me]);
 
+  // A parcel in the list does not say which activity it is in, only how many,
+  // so these two are for the whole portfolio, whatever the scope.
+  const parcelSummary = useMemo(() => {
+    const linked = parcels.filter((parcel) => Number(parcel.project_count) > 0);
+    return {
+      areaHa: linked.reduce((sum, parcel) => sum + (Number(parcel.area_ha) || 0), 0),
+      withoutOwner: linked.filter((parcel) => parcel.has_owner === false).length,
+    };
+  }, [parcels]);
+
   const rows = useMemo(() => {
-    if (scope === "open") {
-      return projects.filter((project) => ["draft", "ready"].includes(project.status));
-    }
-
-    if (scope === "submitted") {
-      return projects.filter((project) => ["submitted", "accepted", "rejected"].includes(project.status));
-    }
-
+    if (scope === "open") return projects.filter(isEditable);
+    if (scope === "submitted") return projects.filter(isWithDcr);
     return projects;
   }, [projects, scope]);
 
-  const stats = useMemo(() => {
-    const needingAttention = rows.filter((project) => (
-      project.status === "rejected"
-      || project.dcr_sync_status === "failed"
-      || (project.status === "draft" && missingPieces(project).length > 0)
-    )).length;
+  const drafts = useMemo(() => rows.filter(isEditable), [rows]);
+  const withDcr = useMemo(() => rows.filter(isWithDcr), [rows]);
 
-    const inReview = rows.filter((project) => project.status === "submitted").length;
-
-    const completeness = rows.length
-      ? Math.round(rows.reduce((sum, project) => sum + localCompleteness(project), 0) / rows.length)
-      : 0;
-
-    return {
-      portfolio: rows.length,
-      needingAttention,
-      inReview,
-      completeness,
-    };
-  }, [rows]);
+  const needingAttention = useMemo(() => rows.filter((project) => (
+    project.status === "rejected"
+    || changesRequested(project)
+    || project.dcr_sync_status === "failed"
+    || (project.status === "draft" && missingPieces(project).length > 0)
+  )).length, [rows]);
 
   // The snapshot that sits in the greeting. Tone is read off the number itself,
   // so "need attention" only shouts when there is something to shout about.
@@ -142,74 +159,90 @@ function Overview() {
     {
       id: "portfolio",
       label: "Activities",
-      value: stats.portfolio,
+      value: rows.length,
       tone: "brand",
     },
     {
       id: "area",
-      label: "Managed land",
-      value: totalAreaHa.toLocaleString(undefined, { maximumFractionDigits: 0 }),
+      label: "Land in activities",
+      value: parcelSummary.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 }),
       unit: "ha",
+      sublabel: "Across all activities",
       tone: "neutral",
     },
     {
       id: "attention",
       label: "Need attention",
-      value: stats.needingAttention,
-      tone: stats.needingAttention > 0 ? "warning" : "positive",
+      value: needingAttention,
+      tone: needingAttention > 0 ? "warning" : "positive",
     },
     {
-      id: "completeness",
-      label: "Avg completeness",
-      value: stats.completeness,
-      unit: "%",
-      tone: stats.completeness >= 80 ? "positive" : (stats.completeness >= 40 ? "brand" : "warning"),
+      id: "dcr",
+      label: "With DCR",
+      value: withDcr.length,
+      tone: "neutral",
     },
-  ], [stats, totalAreaHa]);
+  ], [rows, parcelSummary, needingAttention, withDcr]);
 
-  // Three real measures, each the share of activities that have that piece.
+  // Three real measures, each the share of drafts that have that piece.
+  // Submitted activities had all of them, so they would only pad the bars.
   const readinessDistribution = useMemo(() => {
-    if (!rows.length) {
-      return [
-        { label: "Plans created", value: 0, tone: "warning" },
-        { label: "Parcels linked", value: 0, tone: "warning" },
-        { label: "Evidence attached", value: 0, tone: "warning" },
-      ];
-    }
+    const share = (predicate) => (drafts.length
+      ? Math.round((drafts.filter(predicate).length / drafts.length) * 100)
+      : 0);
 
-    const share = (predicate) =>
-      Math.round((rows.filter(predicate).length / rows.length) * 100);
-
-    const toneFor = (value) => (value >= 80 ? "positive" : (value >= 40 ? "default" : "warning"));
+    const toneFor = (value) => (value >= 80 ? "default" : (value >= 40 ? "blue" : "orange"));
 
     const plans = share((project) => project.has_plan && project.has_monitoring_plan);
-    const parcels = share((project) => Number(project.parcel_count) > 0);
+    const linked = share((project) => Number(project.parcel_count) > 0);
     const documents = share((project) => Number(project.document_count) > 0);
 
     return [
       { label: "Plans created", value: plans, tone: toneFor(plans) },
-      { label: "Parcels linked", value: parcels, tone: toneFor(parcels) },
-      { label: "Evidence attached", value: documents, tone: toneFor(documents) },
+      { label: "Parcels linked", value: linked, tone: toneFor(linked) },
+      { label: "Documents uploaded", value: documents, tone: toneFor(documents) },
     ];
-  }, [rows]);
+  }, [drafts]);
 
-  const upcomingTasks = useMemo(
-    () =>
-      rows
-        .filter((project) => project.status === "draft" || project.status === "rejected")
-        .map((project) => ({ project, missing: missingPieces(project) }))
-        .filter((entry) => entry.missing.length > 0)
-        .sort((a, b) => a.missing.length - b.missing.length)
-        .slice(0, 3)
-        .map(({ project, missing }) => ({
-          id: project.id,
-          title: project.name,
-          detail: `Missing: ${missing.join(", ")}`,
-          tone: missing.length > 3 ? "negative" : (missing.length > 1 ? "warning" : "positive"),
-          count: missing.length,
-        })),
-    [rows],
-  );
+  // What the operator can act on: the certifier's change requests first, then
+  // the drafts closest to done, then the owners still to declare.
+  const upcomingTasks = useMemo(() => {
+    const amendments = rows
+      .filter(changesRequested)
+      .map((project) => ({
+        id: `amendment-${project.id}`,
+        title: project.name,
+        detail: "Changes requested by the certifier",
+        tone: "warning",
+        badge: "Changes",
+        onOpen: () => openActivity(project.id),
+      }));
+
+    const unfinished = rows
+      .filter((project) => isEditable(project) && !changesRequested(project))
+      .map((project) => ({ project, missing: missingPieces(project) }))
+      .filter((entry) => entry.missing.length > 0)
+      .sort((a, b) => a.missing.length - b.missing.length)
+      .map(({ project, missing }) => ({
+        id: `draft-${project.id}`,
+        title: project.name,
+        detail: `Missing: ${missing.join(", ")}`,
+        tone: missing.length > 3 ? "negative" : (missing.length > 1 ? "warning" : "positive"),
+        badge: `${missing.length} left`,
+        onOpen: () => openActivity(project.id),
+      }));
+
+    const owners = parcelSummary.withoutOwner > 0 ? [{
+      id: "owners",
+      title: "Declared owners",
+      detail: `${parcelSummary.withoutOwner} parcel${parcelSummary.withoutOwner === 1 ? " in your activities has" : "s in your activities have"} no declared owner. Owners can be added until the verification is final.`,
+      tone: "warning",
+      badge: String(parcelSummary.withoutOwner),
+      onOpen: () => navigate("/activities"),
+    }] : [];
+
+    return [...amendments, ...unfinished].slice(0, 3).concat(owners);
+  }, [rows, parcelSummary, openActivity, navigate]);
 
   const columns = useMemo(
     () => [
@@ -219,7 +252,13 @@ function Overview() {
         meta: { align: "left" },
         cell: ({ row }) => (
           <div className="ogcr-overview__project-cell">
-            <strong>{row.original.name}</strong>
+            <button
+              type="button"
+              className="ogcr-overview__link"
+              onClick={() => openActivity(row.original.id)}
+            >
+              <strong>{row.original.name}</strong>
+            </button>
             <span>{projectLocation(row.original)}</span>
           </div>
         ),
@@ -258,8 +297,23 @@ function Overview() {
           <Pill tone={syncTone(row.original)}>{syncLabel(row.original)}</Pill>
         ),
       },
+      {
+        id: "verification",
+        accessorFn: (row) => (isWithDcr(row) ? verificationCodeOf(row) : ""),
+        header: "Verification",
+        meta: { align: "left" },
+        cell: ({ row }) => {
+          if (!isWithDcr(row.original)) return null;
+          const code = verificationCodeOf(row.original);
+          return (
+            <Pill tone={code ? verificationTone(code) : "neutral"}>
+              {code ? verificationLabel(code) : "Not started"}
+            </Pill>
+          );
+        },
+      },
     ],
-    [],
+    [openActivity],
   );
 
   return (
@@ -272,7 +326,7 @@ function Overview() {
             <p className="ogcr-overview__subtitle">
               {operator?.legal_name
                 ? `Portfolio for ${operator.legal_name}. Everything stays on the Operator Platform until an activity is submitted to DCR.`
-                : "Track portfolio readiness, identify activity risk, and move reporting actions forward from one dashboard."}
+                : "Set up your Operator profile to start adding activities."}
             </p>
           </div>
 
@@ -288,15 +342,17 @@ function Overview() {
               </span>
               <span>Workflow guide</span>
             </button>
-            <Select
-              label="Scope"
-              value={scope}
-              onChange={(event) => setScope(event.target.value)}
-              options={scopeOptions}
-            />
+            <div className="ogcr-overview__scope">
+              <Select
+                label="Scope"
+                value={scope || null}
+                onValueChange={(value) => setScope(value)}
+                options={scopeOptions}
+              />
+            </div>
             <Button
               variant="outlined"
-              startIcon={<ArrowClockwiseIcon size={16} weight="bold" />}
+              iconLeft={<ArrowClockwiseIcon size={16} weight="bold" />}
               onClick={refresh}
             >
               Refresh
@@ -318,24 +374,24 @@ function Overview() {
 
       {Boolean(error) && (
         <Message
-          variant="error"
+          state="error"
           title="Could not load the portfolio"
           description={error}
-          onClose={() => setError("")}
+          onDismiss={() => setError("")}
         />
       )}
 
       <Card
         title="Activity health board"
-        subtitle="Sortable portfolio list for quick triage"
-        trailing={<Pill tone="positive">{rows.length} records</Pill>}
+        subtitle="Every activity, where it stands"
+        trailing={<Pill tone="neutral">{rows.length} {rows.length === 1 ? "activity" : "activities"}</Pill>}
       >
         <DataTable
           data={rows}
           columns={columns}
           loading={status === "loading"}
           skeletonRows={6}
-          caption="Portfolio health and reporting readiness"
+          caption="Status, completeness and verification of each activity"
           ariaLabel="Overview activity health table"
           emptyText="No activities in this scope yet."
         />
@@ -344,40 +400,46 @@ function Overview() {
       <section className="ogcr-overview__grid">
         <Card
           title="Readiness pipeline"
-          subtitle="Share of activities that have each piece in place"
-          trailing={<Pill tone="neutral">{stats.inReview} with DCR</Pill>}
+          subtitle="Drafts that have each piece in place"
+          trailing={<Pill tone="neutral">{drafts.length} {drafts.length === 1 ? "draft" : "drafts"}</Pill>}
         >
-          <div className="ogcr-overview__pipeline">
-            {readinessDistribution.map((item) => (
-              <ProgressBar
-                key={item.label}
-                label={item.label}
-                value={item.value}
-                tone={item.tone}
-              />
-            ))}
-          </div>
+          {drafts.length ? (
+            <div className="ogcr-overview__pipeline">
+              {readinessDistribution.map((item) => (
+                <ProgressBar
+                  key={item.label}
+                  label={item.label}
+                  value={item.value}
+                  tone={item.tone}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="ogcr-overview__footnote">No drafts in this scope.</p>
+          )}
         </Card>
 
         <Card
           title="Upcoming actions"
-          subtitle="Drafts with the least left to do"
+          subtitle="Change requests first, then the drafts closest to done"
           trailing={<CalendarDotsIcon size={18} weight="duotone" />}
         >
           <ul className="ogcr-overview__tasks" aria-label="Upcoming activity tasks">
             {upcomingTasks.length ? upcomingTasks.map((task) => (
               <li key={task.id} className="ogcr-overview__task-item">
                 <div>
-                  <p className="ogcr-overview__task-title">{task.title}</p>
+                  <button type="button" className="ogcr-overview__link" onClick={task.onOpen}>
+                    <span className="ogcr-overview__task-title">{task.title}</span>
+                  </button>
                   <p className="ogcr-overview__task-detail">{task.detail}</p>
                 </div>
-                <Pill tone={task.tone}>{task.count} left</Pill>
+                <Pill tone={task.tone}>{task.badge}</Pill>
               </li>
             )) : (
               <li className="ogcr-overview__task-item">
                 <div>
                   <p className="ogcr-overview__task-detail">
-                    {rows.length ? "Nothing outstanding on your drafts." : "No activities yet."}
+                    {rows.length ? "Nothing to do right now." : "No activities yet."}
                   </p>
                 </div>
               </li>
@@ -387,7 +449,7 @@ function Overview() {
           <div className="ogcr-overview__task-actions">
             <Button
               variant="text"
-              endIcon={<ArrowRightIcon size={14} weight="bold" />}
+              iconRight={<ArrowRightIcon size={14} weight="bold" />}
               onClick={() => navigate("/activities")}
             >
               Open activities
@@ -397,21 +459,45 @@ function Overview() {
       </section>
 
       <Card
-        title="Submission cadence"
-        subtitle="Current operations signal"
+        title="With the certifier"
+        subtitle="Submitted activities and their verification on DCR"
         trailing={<ClockCountdownIcon size={18} weight="duotone" />}
       >
+        {withDcr.length ? (
+          <ul className="ogcr-overview__tasks" aria-label="Activities with the certifier">
+            {withDcr.map((project) => {
+              const code = verificationCodeOf(project);
+              return (
+                <li key={project.id} className="ogcr-overview__task-item">
+                  <div>
+                    <button type="button" className="ogcr-overview__link" onClick={() => openActivity(project.id)}>
+                      <span className="ogcr-overview__task-title">{project.name}</span>
+                    </button>
+                    {project.dcr_status_checked_at && (
+                      <p className="ogcr-overview__task-detail" title={formatDateTime(project.dcr_status_checked_at)}>
+                        Checked {formatRelative(project.dcr_status_checked_at)}
+                      </p>
+                    )}
+                  </div>
+                  <Pill tone={code ? verificationTone(code) : "neutral"}>
+                    {code ? verificationLabel(code) : "Not started"}
+                  </Pill>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="ogcr-overview__footnote">Nothing submitted yet.</p>
+        )}
         <p className="ogcr-overview__footnote">
-          {stats.needingAttention > 0
-            ? `${stats.needingAttention} activit${stats.needingAttention === 1 ? "y needs" : "ies need"} attention before they can be submitted.`
-            : "Every activity in this scope is complete enough to submit."}
+          The server reads the outcome from DCR every 15 minutes; an activity&apos;s Refresh asks right away.
         </p>
         <Button
           variant="outlined"
-          endIcon={<ArrowRightIcon size={14} weight="bold" />}
+          iconRight={<ArrowRightIcon size={14} weight="bold" />}
           onClick={() => navigate("/activities")}
         >
-          Review evidence
+          Open activities
         </Button>
       </Card>
 
@@ -424,35 +510,35 @@ function Overview() {
           <div>
             <h3 className="ogcr-overview__section-title">Certification Workflow</h3>
             <p className="ogcr-overview__section-subtitle">
-              A simple four-step guide to how activities move from ownership validation to recurring re-certification.
+              How an activity moves from a draft here to a certificate on DCR.
             </p>
           </div>
-          <Pill tone="brand">4-step guide</Pill>
+          <Pill tone="progress">4 steps</Pill>
         </div>
 
         <div className="ogcr-overview__phases-grid">
           <Card className="ogcr-overview__phase-card ogcr-overview__phase-card--phase1">
             <span className="ogcr-overview__phase-step">01</span>
             <div className="ogcr-overview__phase-icon">
-              <IdentificationCardIcon size={28} weight="duotone" />
+              <ClipboardTextIcon size={28} weight="duotone" />
             </div>
-            <h4 className="ogcr-overview__phase-title">Ownership Verification</h4>
+            <h4 className="ogcr-overview__phase-title">Prepare</h4>
             <p className="ogcr-overview__phase-description">
-              Verify parcel boundaries and land ownership against national LPIS and cadastres to establish the legal activity foundation.
+              Fill in the activity details, add its parcels from the cadastre, declare their owners, write the activity and monitoring plans and upload the documents.
             </p>
-            <Pill tone="positive">Automated & Manual</Pill>
+            <Pill tone="positive">Operator</Pill>
           </Card>
 
           <Card className="ogcr-overview__phase-card ogcr-overview__phase-card--phase2">
             <span className="ogcr-overview__phase-step">02</span>
             <div className="ogcr-overview__phase-icon">
-              <FileIcon size={28} weight="duotone" />
+              <PaperPlaneTiltIcon size={28} weight="duotone" />
             </div>
-            <h4 className="ogcr-overview__phase-title">Scheme Recognition</h4>
+            <h4 className="ogcr-overview__phase-title">Submit to DCR</h4>
             <p className="ogcr-overview__phase-description">
-              Confirm that the selected certification scheme is recognised and matched to the activity methodology requirements.
+              The activity and its plans go to DCR. The certification platform then registers the parcels, and each declared owner follows as soon as their parcel is registered.
             </p>
-            <Pill tone="warning">Requires Approval</Pill>
+            <Pill tone="warning">Operator + certification platform</Pill>
           </Card>
 
           <Card className="ogcr-overview__phase-card ogcr-overview__phase-card--phase3">
@@ -460,23 +546,23 @@ function Overview() {
             <div className="ogcr-overview__phase-icon">
               <ShieldCheckIcon size={28} weight="duotone" />
             </div>
-            <h4 className="ogcr-overview__phase-title">Certification</h4>
+            <h4 className="ogcr-overview__phase-title">Validation and verification</h4>
             <p className="ogcr-overview__phase-description">
-              An accredited Certification Body reviews Activity and Monitoring Plans, calculates carbon removal, and issues compliance results.
+              The certifier validates the plans and verifies the activity and its ownership. If they ask for changes, the activity opens up here again until you resubmit.
             </p>
-            <Pill tone="neutral">Expert Audit</Pill>
+            <Pill tone="neutral">Certifier</Pill>
           </Card>
 
           <Card className="ogcr-overview__phase-card ogcr-overview__phase-card--phase4">
             <span className="ogcr-overview__phase-step">04</span>
             <div className="ogcr-overview__phase-icon">
-              <ArrowClockwiseIcon size={28} weight="duotone" />
+              <CertificateIcon size={28} weight="duotone" />
             </div>
-            <h4 className="ogcr-overview__phase-title">Re-Certification</h4>
+            <h4 className="ogcr-overview__phase-title">Certificate and re-certification</h4>
             <p className="ogcr-overview__phase-description">
-              Monitoring restarts when the reporting period closes, keeping the activity compliant and ready to issue new credits.
+              The certificate and audit reports appear in the activity. Monitoring carries on, and re-certification renews the certificate when it runs out.
             </p>
-            <Pill tone="brand">Cyclical</Pill>
+            <Pill tone="progress">Cyclical</Pill>
           </Card>
         </div>
 
@@ -484,12 +570,12 @@ function Overview() {
           <div className="ogcr-overview__conformity-copy">
             <h4 className="ogcr-overview__conformity-title">Non-Conformity Types</h4>
             <p className="ogcr-overview__conformity-description">
-              Findings can appear during audit or re-certification. Each level has a different remediation timeline and impact on activity status.
+              Findings can appear during audit or re-certification. Each level has a different remediation timeline and impact on activity status. They are listed with the audit reports in the activity's Certification card.
             </p>
           </div>
           <div className="ogcr-overview__conformity-list">
             <div className="ogcr-overview__conformity-item">
-              <Pill tone="critical">Critical</Pill>
+              <Pill tone="negative">Critical</Pill>
               <span>Immediate withdrawal due to fraud or data falsification.</span>
             </div>
             <div className="ogcr-overview__conformity-item">

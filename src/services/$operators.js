@@ -1,4 +1,4 @@
-import api, { fetchAllPages, toList } from "./$api";
+import api, { fetchAllPages } from "./$api";
 
 class $operators {
   /** Paginated; the API already scopes this to the operators you belong to. */
@@ -37,9 +37,9 @@ class $operators {
     return data;
   }
 
+  /** Every page, as a bare array. */
   async members(operatorId, params) {
-    const { data } = await api.get(`/operators/${operatorId}/members/`, { params });
-    return toList(data);
+    return fetchAllPages(`/operators/${operatorId}/members/`, params);
   }
 
   /** The person must have logged in at least once. Pass username or email. */

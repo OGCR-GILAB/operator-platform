@@ -25,6 +25,27 @@ export function onUnauthorized(handler) {
   return () => unauthorizedHandlers.delete(handler);
 }
 
+const serviceErrorHandlers = new Set();
+
+/**
+ * Register a callback fired when a call is rate limited (429) or DCR cannot be
+ * reached (503). Called with `{ status, error }`. Returns an unsubscribe function.
+ */
+export function onServiceError(handler) {
+  serviceErrorHandlers.add(handler);
+  return () => serviceErrorHandlers.delete(handler);
+}
+
+function notify(handlers, payload) {
+  handlers.forEach((handler) => {
+    try {
+      handler(payload);
+    } catch {
+      // A broken listener must not swallow the original rejection.
+    }
+  });
+}
+
 export function getToken() {
   return session.token;
 }
@@ -101,16 +122,16 @@ api.interceptors.response.use(
     // A 401 on a public endpoint means "these credentials are wrong", not
     // "your session expired" — those calls opt out via `skipUnauthorized`.
     const handled = error?.config?.skipUnauthorized;
+    const status = error?.response?.status;
 
-    if (error?.response?.status === 401 && !handled) {
+    if (status === 401 && !handled) {
       clearSession();
-      unauthorizedHandlers.forEach((handler) => {
-        try {
-          handler(error);
-        } catch {
-          // A broken listener must not swallow the original rejection.
-        }
-      });
+      notify(unauthorizedHandlers, error);
+    }
+
+    // Calls whose 429/503 means something specific opt out via `skipServiceErrors`.
+    if ((status === 429 || status === 503) && !error?.config?.skipServiceErrors) {
+      notify(serviceErrorHandlers, { status, error });
     }
 
     return Promise.reject(error);
@@ -144,6 +165,24 @@ export async function fetchAllPages(path, params = {}) {
   return collected;
 }
 
+/**
+ * The first message in a DRF error value: a string, a list of them, or — for
+ * list fields of objects like `media_links` — per-item `{field: [...]}` maps,
+ * flattened to `link: Enter a valid URL.`.
+ */
+function firstErrorMessage(value) {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (!value || typeof value !== 'object') return '';
+  if (Array.isArray(value)) return value.map(firstErrorMessage).find(Boolean) || '';
+
+  const [key, nested] = Object.entries(value)
+    .find(([, entry]) => firstErrorMessage(entry)) || [];
+  if (!key) return '';
+
+  const message = firstErrorMessage(nested);
+  return /^\d+$/.test(key) || key === 'non_field_errors' ? message : `${key}: ${message}`;
+}
+
 /** Best-effort human-readable message out of either error shape. */
 export function getErrorMessage(err) {
   const data = err?.response?.data;
@@ -155,16 +194,14 @@ export function getErrorMessage(err) {
     if (data.message) return data.message;
     if (data.error) return data.error;
 
-    // DRF field errors: { field: ["message", ...] }
-    const firstField = Object.values(data).find(
-      (value) => (Array.isArray(value) ? value.length : Boolean(value)),
-    );
-    if (Array.isArray(firstField)) return String(firstField[0]);
-    if (firstField && typeof firstField !== 'object') return String(firstField);
+    // DRF field errors: { field: ["message", ...] }, possibly nested per item.
+    const firstField = Object.values(data).map(firstErrorMessage).find(Boolean);
+    if (firstField) return firstField;
   }
 
   if (err?.response?.status === 401) return 'Your session has expired. Please sign in again.';
-  if (err?.response?.status === 503) return 'The service is temporarily unavailable. Please try again shortly.';
+  if (err?.response?.status === 429) return 'Too many requests. Please try again in a minute.';
+  if (err?.response?.status === 503) return 'DCR is unreachable. Please try again shortly.';
 
   return err?.message || 'Something went wrong. Please try again.';
 }
@@ -180,10 +217,23 @@ export function getFieldErrors(err) {
   if (data.detail || data.message) return {};
 
   return Object.entries(data).reduce((fields, [key, value]) => {
-    if (Array.isArray(value) && value.length) fields[key] = String(value[0]);
-    else if (typeof value === 'string') fields[key] = value;
+    const message = firstErrorMessage(value);
+    if (message) fields[key] = message;
     return fields;
   }, {});
+}
+
+/**
+ * The field errors a form has no input for (`non_field_errors`, `file`, …),
+ * joined into one message so they are not silently dropped.
+ */
+export function otherFieldErrors(fields, shown = []) {
+  return Object.entries(fields)
+    .filter(([key]) => !shown.includes(key))
+    .map(([key, message]) => (
+      key === 'non_field_errors' ? message : `${key.replace(/_/g, ' ')}: ${message}`
+    ))
+    .join(' ');
 }
 
 /** The API `code` on a detail error, e.g. `dcr_auth_failed` / `dcr_rejected`. */

@@ -109,11 +109,16 @@ class $documents {
   /** Fetch as a blob and hand it to the browser as a save. */
   async saveToDisk(documentId, fallbackName = 'document') {
     const { blob, filename } = await this.download(documentId);
+    this.saveBlob(blob, filename || fallbackName);
+  }
+
+  /** Save a blob that is already in hand, e.g. one the viewer fetched. */
+  saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
 
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = filename || fallbackName;
+    anchor.download = filename;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();

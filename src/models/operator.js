@@ -9,12 +9,13 @@ class Operator extends Model {
     'address_line_1',
     'address_line_2',
     'postcode',
-    'ogcr_wallet_address',
     'relationship',
   ];
 
+  // `ogcr_wallet_address` is assigned by the DCR registry, never set from here.
   static READABLE = [
     'id',
+    'ogcr_wallet_address',
     'my_relationship',
     'dcr_id',
     'dcr_sync_status',

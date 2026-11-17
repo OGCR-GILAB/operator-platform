@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import Button from "../ui/Button";
-import Card from "../ui/Card";
+import { Button, Card, Input, Message, Textarea } from "@majistudio/ogcr-design-system";
 import { SkeletonField } from "../ui/Skeleton";
-import Message from "../ui/Message";
-import TextField from "../ui/TextField";
-import DatePicker from "../ui/DatePicker";
+import DateField from "../ui/DateField";
 import ActivityTabHeader from "./ActivityTabHeader";
 import { useActivity } from "./ActivityContext";
+import { SetupNextStep } from "./ActivitySetupGuide";
 import $projects from "../../services/$projects";
 import $auth from "../../services/$auth";
 import ActivityPlan from "../../models/activity_plan";
@@ -107,30 +106,6 @@ function FieldGroup({ title, hint, columns = 1, children }) {
 }
 
 /**
- * The visible box of a field comes from `.ogcr-input__field`, not from
- * `.ogcr-input__control` — the control itself is borderless and transparent. A
- * textarea dropped straight into `.ogcr-input` therefore renders with no box at
- * all, which is how every long-form plan field used to look.
- */
-function TextArea({ label, value, onChange, disabled = false, rows = 3, placeholder }) {
-  return (
-    <div className="ogcr-input">
-      {label ? <label className="ogcr-input__label">{label}</label> : null}
-      <div className="ogcr-input__field ogcr-input__field--textarea">
-        <textarea
-          className="ogcr-input__control"
-          rows={rows}
-          value={value || ""}
-          disabled={disabled}
-          placeholder={placeholder}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </div>
-    </div>
-  );
-}
-
-/**
  * A tonnage field.
  *
  * Deliberately `type="text"` rather than `type="number"`: the number input's
@@ -143,7 +118,7 @@ function TextArea({ label, value, onChange, disabled = false, rows = 3, placehol
  */
 function DecimalField({ label, value, draft, disabled, onDraft, onCommit }) {
   return (
-    <TextField
+    <Input
       type="text"
       inputMode="decimal"
       label={label}
@@ -157,14 +132,20 @@ function DecimalField({ label, value, draft, disabled, onDraft, onCommit }) {
   );
 }
 
+// Parcel geometry is stored in WGS 84, so a new plan starts out saying so.
+const DEFAULT_CRS = "EPSG:4326";
+
 /**
  * `projects/{id}/plan/` and `projects/{id}/monitoring-plan/` are single objects,
- * created or replaced with PUT. No field is required on either. Both live on one
- * page: the activity plan states the intent, the monitoring plan states how it
- * will be measured, and they are saved together.
+ * created or replaced with PUT. No field is required on either, and neither
+ * exists until it is first saved. Both live on one page: the activity plan
+ * states the intent, the monitoring plan states how it will be measured. Save
+ * writes only the plans that changed, so touching one never creates the other
+ * empty — `has_plan` / `has_monitoring_plan` mean someone filled it in.
  */
 function ActivityPlans() {
   const { activityId, editable, reload: reloadActivity } = useActivity();
+  const { hash } = useLocation();
 
   const [plan, setPlan] = useState(null);
   const [monitoring, setMonitoring] = useState(null);
@@ -174,6 +155,12 @@ function ActivityPlans() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [dirty, setDirty] = useState({ plan: false, monitoring: false });
+
+  const touch = (which) => {
+    setDirty((current) => (current[which] ? current : { ...current, [which]: true }));
+    setSaved(false);
+  };
 
   useEffect(() => {
     if (!activityId) return undefined;
@@ -186,7 +173,11 @@ function ActivityPlans() {
     ])
       .then(([planRecord, monitoringRecord]) => {
         if (cancelled) return;
-        setPlan(new ActivityPlan(planRecord || {}));
+        setPlan(new ActivityPlan({
+          ...(planRecord || {}),
+          coordinate_reference_system: planRecord?.coordinate_reference_system
+            || (editable ? DEFAULT_CRS : undefined),
+        }));
         setMonitoring(new MonitoringPlan(monitoringRecord || {}));
         setLoading(false);
       })
@@ -197,16 +188,24 @@ function ActivityPlans() {
       });
 
     return () => { cancelled = true; };
+    // `editable` only seeds the CRS default; it must not refetch the plans.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activityId]);
+
+  // The overview's setup guide links straight to either plan.
+  useEffect(() => {
+    if (loading || !hash) return;
+    document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [loading, hash]);
 
   const updatePlan = (field, value) => {
     setPlan((current) => Object.assign(new ActivityPlan(current), { [field]: value }));
-    setSaved(false);
+    touch("plan");
   };
 
   const draftNumber = (field, raw) => {
     setNumberDrafts((current) => ({ ...current, [field]: raw }));
-    setSaved(false);
+    touch("plan");
   };
 
   /** Parse one draft into the plan and let the model own the value again. */
@@ -224,7 +223,7 @@ function ActivityPlans() {
 
   const updateMonitoring = (field, value) => {
     setMonitoring((current) => Object.assign(new MonitoringPlan(current), { [field]: value }));
-    setSaved(false);
+    touch("monitoring");
   };
 
   const updateParameter = (index, field, value) => {
@@ -233,7 +232,7 @@ function ActivityPlans() {
       parameters[index] = { ...parameters[index], [field]: value };
       return Object.assign(new MonitoringPlan(current), { monitored_data_parameters: parameters });
     });
-    setSaved(false);
+    touch("monitoring");
   };
 
   const handleSave = async () => {
@@ -249,13 +248,20 @@ function ActivityPlans() {
     );
 
     try {
-      // PUT creates or replaces; both plans are saved together so a half-saved
-      // activity is never left behind.
-      await $projects.savePlan(activityId, flushed.toPayload());
-      await $projects.saveMonitoringPlan(activityId, monitoring.toPayload());
+      // PUT creates or replaces. Each plan is cleared from `dirty` as it lands,
+      // so a retry after a failure only resends what is still unsaved.
+      if (dirty.plan) {
+        await $projects.savePlan(activityId, flushed.toPayload());
+        setPlan(flushed);
+        setNumberDrafts({});
+        setDirty((current) => ({ ...current, plan: false }));
+      }
 
-      setPlan(flushed);
-      setNumberDrafts({});
+      if (dirty.monitoring) {
+        await $projects.saveMonitoringPlan(activityId, monitoring.toPayload());
+        setDirty((current) => ({ ...current, monitoring: false }));
+      }
+
       setSaved(true);
       // `has_plan` / `has_monitoring_plan` feed the readiness checks on Overview.
       reloadActivity();
@@ -280,17 +286,17 @@ function ActivityPlans() {
       <div className="ogcr-activity-tab" aria-busy="true">
         <ActivityTabHeader description="Loading the activity and monitoring plans…" />
 
-        {["Activity plan", "Monitoring plan"].map((title, cardIndex) => (
+        {["Activity plan", "Monitoring plan"].map((title) => (
           <Card key={title} title={title}>
             <div className="ogcr-fieldgroup-stack">
               <FieldGroup title="Reference data">
-                <SkeletonField delay={cardIndex * 120} />
-                <SkeletonField delay={cardIndex * 120 + 80} />
+                <SkeletonField />
+                <SkeletonField />
               </FieldGroup>
 
               <FieldGroup title="Detail" columns={2}>
-                <SkeletonField delay={cardIndex * 120 + 160} />
-                <SkeletonField delay={cardIndex * 120 + 240} />
+                <SkeletonField />
+                <SkeletonField />
               </FieldGroup>
             </div>
           </Card>
@@ -308,199 +314,211 @@ function ActivityPlans() {
       />
 
       {Boolean(error) && (
-        <Message variant="error" title="Could not save" description={error} onClose={() => setError("")} />
+        <Message state="error" title="Could not save" description={error} onDismiss={() => setError("")} />
       )}
       {saved && (
-        <Message variant="success" title="Plans saved" description="Both plans have been stored." onClose={() => setSaved(false)} />
+        <Message state="success" title="Plans saved" description="Your changes have been stored." onDismiss={() => setSaved(false)} />
       )}
 
-      <Card title="Activity plan" subtitle="What this activity is and what it expects to achieve.">
-        <div className="ogcr-fieldgroup-stack">
-          <FieldGroup
-            title="Reference data"
-            hint="How the geometry is expressed, and the scheme codes the parcels fall under."
-            columns={2}
-          >
-            <DatePicker
-              label="Date submitted"
-              value={plan.date_submitted || ""}
-              disabled={!editable}
-              onChange={(value) => updatePlan("date_submitted", value)}
-            />
-            <TextField
-              label="Coordinate reference system"
-              placeholder="e.g., EPSG:4326"
-              value={plan.coordinate_reference_system || ""}
-              disabled={!editable}
-              onChange={(event) => updatePlan("coordinate_reference_system", event.target.value)}
-            />
-            <TextField
-              label="IACS codes"
-              placeholder="Comma-separated"
-              value={(plan.iacs_codes || []).join(", ")}
-              disabled={!editable}
-              onChange={(event) => updatePlan("iacs_codes", parseCodes(event.target.value))}
-            />
-            <TextField
-              label="LPIS codes"
-              placeholder="Comma-separated"
-              value={(plan.lpis_codes || []).join(", ")}
-              disabled={!editable}
-              onChange={(event) => updatePlan("lpis_codes", parseCodes(event.target.value))}
-            />
-          </FieldGroup>
+      <SetupNextStep covers={["plan", "monitoring"]} />
 
-          {ACTIVITY_GROUPS.map((group) => (
+      <div id="activity-plan" className="ogcr-anchor-target">
+        <Card title="Activity plan" subtitle="What this activity is and what it expects to achieve.">
+          <div className="ogcr-fieldgroup-stack">
             <FieldGroup
-              key={group.id}
-              title={group.title}
-              hint={group.hint}
-              columns={group.numbers ? 2 : 1}
+              title="Reference data"
+              hint="How the geometry is expressed, and the scheme codes the parcels fall under."
+              columns={2}
             >
-              {(group.text || []).map(([field, label]) => (
-                <TextArea
-                  key={field}
-                  label={label}
-                  value={plan[field]}
-                  disabled={!editable}
-                  onChange={(value) => updatePlan(field, value)}
-                />
-              ))}
+              <DateField
+                label="Date submitted"
+                value={plan.date_submitted || ""}
+                disabled={!editable}
+                onChange={(value) => updatePlan("date_submitted", value)}
+              />
+              <Input
+                label="Coordinate reference system"
+                placeholder="e.g., EPSG:4326"
+                value={plan.coordinate_reference_system || ""}
+                disabled={!editable}
+                onChange={(event) => updatePlan("coordinate_reference_system", event.target.value)}
+              />
+              <Input
+                label="IACS codes"
+                placeholder="Comma-separated"
+                value={(plan.iacs_codes || []).join(", ")}
+                disabled={!editable}
+                onChange={(event) => updatePlan("iacs_codes", parseCodes(event.target.value))}
+              />
+              <Input
+                label="LPIS codes"
+                placeholder="Comma-separated"
+                value={(plan.lpis_codes || []).join(", ")}
+                disabled={!editable}
+                onChange={(event) => updatePlan("lpis_codes", parseCodes(event.target.value))}
+              />
+            </FieldGroup>
 
-              {(group.numbers || []).map(([field, label]) => (
-                <DecimalField
+            {ACTIVITY_GROUPS.map((group) => (
+              <FieldGroup
+                key={group.id}
+                title={group.title}
+                hint={group.hint}
+                columns={group.numbers ? 2 : 1}
+              >
+                {(group.text || []).map(([field, label]) => (
+                  <Textarea
+                    key={field}
+                    label={label}
+                    rows={3}
+                    value={plan[field] || ""}
+                    disabled={!editable}
+                    onChange={(event) => updatePlan(field, event.target.value)}
+                  />
+                ))}
+
+                {(group.numbers || []).map(([field, label]) => (
+                  <DecimalField
+                    key={field}
+                    label={label}
+                    value={plan[field]}
+                    draft={numberDrafts[field]}
+                    disabled={!editable}
+                    onDraft={(raw) => draftNumber(field, raw)}
+                    onCommit={() => commitNumber(field)}
+                  />
+                ))}
+              </FieldGroup>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <div id="monitoring-plan" className="ogcr-anchor-target">
+        <Card title="Monitoring plan" subtitle="How the activity will be measured, and by whom.">
+          <div className="ogcr-fieldgroup-stack">
+            <FieldGroup title="Schedule" hint="When monitoring reports are due." columns={2}>
+              <DateField
+                label="Date submitted"
+                value={monitoring.date_submitted || ""}
+                disabled={!editable}
+                onChange={(value) => updateMonitoring("date_submitted", value)}
+              />
+              <Input
+                label="Monitoring frequency"
+                placeholder="e.g., Annually"
+                value={monitoring.monitoring_frequency || ""}
+                disabled={!editable}
+                onChange={(event) => updateMonitoring("monitoring_frequency", event.target.value)}
+              />
+            </FieldGroup>
+
+            <FieldGroup
+              title="Monitored parameters"
+              hint="Each measurement this activity collects, with its unit and scope."
+            >
+              <div className="ogcr-parameter-list">
+                {(monitoring.monitored_data_parameters || []).length === 0 && (
+                  <p className="ogcr-fieldgroup__empty">
+                    No parameters yet — add the first measurement this activity records.
+                  </p>
+                )}
+
+                {(monitoring.monitored_data_parameters || []).map((parameter, index) => (
+                  // Rows have no stable id; the position is the identity here.
+                  <div key={`parameter-${index}`} className="ogcr-parameter-list__row">
+                    <Input
+                      label={index === 0 ? "Name" : undefined}
+                      aria-label="Parameter name"
+                      placeholder="e.g., Soil organic carbon"
+                      value={parameter.name || ""}
+                      disabled={!editable}
+                      onChange={(event) => updateParameter(index, "name", event.target.value)}
+                    />
+                    <Input
+                      label={index === 0 ? "Unit" : undefined}
+                      aria-label="Parameter unit"
+                      placeholder="e.g., t/ha"
+                      value={parameter.unit || ""}
+                      disabled={!editable}
+                      onChange={(event) => updateParameter(index, "unit", event.target.value)}
+                    />
+                    <Input
+                      label={index === 0 ? "Scope" : undefined}
+                      aria-label="Parameter scope"
+                      placeholder="e.g., Per parcel"
+                      value={parameter.scope || ""}
+                      disabled={!editable}
+                      onChange={(event) => updateParameter(index, "scope", event.target.value)}
+                    />
+                    <Button
+                      variant="text"
+                      size="s"
+                      disabled={!editable}
+                      aria-label={`Remove parameter ${index + 1}`}
+                      iconLeft={<TrashIcon size={16} />}
+                      onClick={() => updateMonitoring(
+                        "monitored_data_parameters",
+                        monitoring.monitored_data_parameters.filter((_, position) => position !== index),
+                      )}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+
+                <div>
+                  <Button
+                    variant="outlined"
+                    size="s"
+                    disabled={!editable}
+                    iconLeft={<PlusIcon size={16} />}
+                    onClick={() => updateMonitoring(
+                      "monitored_data_parameters",
+                      [...(monitoring.monitored_data_parameters || []), emptyMonitoredParameter()],
+                    )}
+                  >
+                    Add parameter
+                  </Button>
+                </div>
+              </div>
+            </FieldGroup>
+
+            <FieldGroup
+              title="Methods and quality"
+              hint="Where the data comes from, how it is measured, and who is answerable for it."
+            >
+              {MONITORING_TEXT_FIELDS.map(([field, label]) => (
+                <Textarea
                   key={field}
                   label={label}
-                  value={plan[field]}
-                  draft={numberDrafts[field]}
+                  rows={3}
+                  value={monitoring[field] || ""}
                   disabled={!editable}
-                  onDraft={(raw) => draftNumber(field, raw)}
-                  onCommit={() => commitNumber(field)}
+                  onChange={(event) => updateMonitoring(field, event.target.value)}
                 />
               ))}
             </FieldGroup>
-          ))}
-        </div>
-      </Card>
-
-      <Card title="Monitoring plan" subtitle="How the activity will be measured, and by whom.">
-        <div className="ogcr-fieldgroup-stack">
-          <FieldGroup title="Schedule" hint="When monitoring reports are due." columns={2}>
-            <DatePicker
-              label="Date submitted"
-              value={monitoring.date_submitted || ""}
-              disabled={!editable}
-              onChange={(value) => updateMonitoring("date_submitted", value)}
-            />
-            <TextField
-              label="Monitoring frequency"
-              placeholder="e.g., Annually"
-              value={monitoring.monitoring_frequency || ""}
-              disabled={!editable}
-              onChange={(event) => updateMonitoring("monitoring_frequency", event.target.value)}
-            />
-          </FieldGroup>
-
-          <FieldGroup
-            title="Monitored parameters"
-            hint="Each measurement this activity collects, with its unit and scope."
-          >
-            <div className="ogcr-parameter-list">
-              {(monitoring.monitored_data_parameters || []).length === 0 && (
-                <p className="ogcr-fieldgroup__empty">
-                  No parameters yet — add the first measurement this activity records.
-                </p>
-              )}
-
-              {(monitoring.monitored_data_parameters || []).map((parameter, index) => (
-                // Rows have no stable id; the position is the identity here.
-                <div key={`parameter-${index}`} className="ogcr-parameter-list__row">
-                  <TextField
-                    label={index === 0 ? "Name" : undefined}
-                    aria-label="Parameter name"
-                    placeholder="e.g., Soil organic carbon"
-                    value={parameter.name || ""}
-                    disabled={!editable}
-                    onChange={(event) => updateParameter(index, "name", event.target.value)}
-                  />
-                  <TextField
-                    label={index === 0 ? "Unit" : undefined}
-                    aria-label="Parameter unit"
-                    placeholder="e.g., t/ha"
-                    value={parameter.unit || ""}
-                    disabled={!editable}
-                    onChange={(event) => updateParameter(index, "unit", event.target.value)}
-                  />
-                  <TextField
-                    label={index === 0 ? "Scope" : undefined}
-                    aria-label="Parameter scope"
-                    placeholder="e.g., Per parcel"
-                    value={parameter.scope || ""}
-                    disabled={!editable}
-                    onChange={(event) => updateParameter(index, "scope", event.target.value)}
-                  />
-                  <Button
-                    variant="text"
-                    tone="warning"
-                    size="sm"
-                    disabled={!editable}
-                    ariaLabel={`Remove parameter ${index + 1}`}
-                    startIcon={<TrashIcon size={16} />}
-                    onClick={() => updateMonitoring(
-                      "monitored_data_parameters",
-                      monitoring.monitored_data_parameters.filter((_, position) => position !== index),
-                    )}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
-
-              <div>
-                <Button
-                  variant="outlined"
-                  size="sm"
-                  disabled={!editable}
-                  startIcon={<PlusIcon size={16} />}
-                  onClick={() => updateMonitoring(
-                    "monitored_data_parameters",
-                    [...(monitoring.monitored_data_parameters || []), emptyMonitoredParameter()],
-                  )}
-                >
-                  Add parameter
-                </Button>
-              </div>
-            </div>
-          </FieldGroup>
-
-          <FieldGroup
-            title="Methods and quality"
-            hint="Where the data comes from, how it is measured, and who is answerable for it."
-          >
-            {MONITORING_TEXT_FIELDS.map(([field, label]) => (
-              <TextArea
-                key={field}
-                label={label}
-                value={monitoring[field]}
-                disabled={!editable}
-                onChange={(value) => updateMonitoring(field, value)}
-              />
-            ))}
-          </FieldGroup>
-        </div>
-      </Card>
+          </div>
+        </Card>
+      </div>
 
       {editable && (
-        // Both plans save together, and the form is long — so the action rides
+        // One save for both cards, and the form is long — so the action rides
         // along at the bottom of the viewport rather than only at the very end.
         <div className="ogcr-form-actionbar">
           <span className="ogcr-form-actionbar__note">
-            Saves the activity plan and the monitoring plan together.
+            {dirty.plan && dirty.monitoring
+              ? "Saves both plans."
+              : (dirty.plan
+                ? "Saves the activity plan. You can fill in the monitoring plan later."
+                : (dirty.monitoring
+                  ? "Saves the monitoring plan. You can fill in the activity plan later."
+                  : "No unsaved changes."))}
           </span>
           <Button
             variant="filled"
-            tone="brand"
-            disabled={saving}
+            disabled={saving || (!dirty.plan && !dirty.monitoring)}
             onClick={handleSave}
           >
             {saving ? "Saving…" : "Save plans"}

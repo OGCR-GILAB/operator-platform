@@ -1,6 +1,6 @@
 function Content({children}) {
   return (
-    <div className="ogcr-content-shell p-5">
+    <div className="ogcr-content-shell p-20">
       {children}
     </div>
   )

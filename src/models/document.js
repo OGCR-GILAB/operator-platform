@@ -16,6 +16,7 @@ class OGCRDocument extends Model {
     'supersedes',
     'is_current',
     'is_frozen',
+    'is_deletable',
     'original_name',
     'content_type',
     'size',

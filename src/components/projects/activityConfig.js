@@ -8,16 +8,6 @@ export {
   syncLabelsWithReference,
 } from "../../config/countries";
 
-// Fallback only. The real schemes come from `GET auth/dcr/certification-schemes/`
-// via `$auth.certificationSchemes()`; this list is what the selects show until
-// that call resolves (or if it fails).
-export const certificationSchemes = [
-  { value: "PERMANENT_REMOVAL", label: "Permanent Carbon Removal Units" },
-  { value: "CARBON_FARMING", label: "Carbon Farming Sequestration Units" },
-  { value: "PRODUCT_STORAGE", label: "Carbon Storage in Product Units" },
-  { value: "SOIL_EMISSION_REDUCTION", label: "Soil Emission Reduction Units" },
-];
-
 // `unit_types` is sent to the API as these exact human-readable strings, and
 // each one implies an activity `type` (never the reverse — two map to
 // CARBON_FARMING). Authoritative copy: `GET reference/` -> unit_types.
@@ -28,55 +18,7 @@ export const unitTypeOptions = [
   { value: "Carbon Storage in Product", label: "Carbon Storage in Product" },
 ];
 
-export const planTemplatesByActivityType = {
-  PERMANENT_REMOVAL: {
-    activityPlanTitle: "Durable Carbon Removal Activity Plan",
-    monitoringPlanTitle: "Long-Term Storage Monitoring Plan",
-  },
-  CARBON_FARMING: {
-    activityPlanTitle: "Regenerative Farming Activity Plan",
-    monitoringPlanTitle: "Soil & Biomass Monitoring Plan",
-  },
-  CARBON_STORAGE_IN_PRODUCTS: {
-    activityPlanTitle: "Product Carbon Storage Activity Plan",
-    monitoringPlanTitle: "Product Lifecycle Monitoring Plan",
-  },
-};
-
-export const planTemplateFor = (activityType) =>
-  planTemplatesByActivityType[activityType] || {
-    activityPlanTitle: "Activity Plan",
-    monitoringPlanTitle: "Monitoring Plan",
-  };
-
-export const wizardSteps = [
-  {
-    title: "Basic activity info",
-    description: "Capture mandatory activity and metadata.",
-  },
-  {
-    title: "Import parcels from cadastre",
-    description: "Cadastre parcel import and selection step placeholder.",
-  },
-  {
-    title: "Certification and plans",
-    description: "Select certification scheme and define activity/monitoring plans.",
-  },
-  {
-    title: "Finish",
-    description: "Initialize activity and create setup records.",
-  },
-];
-
-// Each stage is a real request, in order. See CreateProjectWizardModal.
-export const setupStages = [
-  "Creating the activity",
-  "Creating the activity plan",
-  "Creating the monitoring plan",
-  "Checking submission readiness",
-];
-
-export const getInitialWizardForm = (operatorId) => ({
+export const getInitialActivityForm = (operatorId) => ({
   // Mirrors the POST /projects/ payload. The schema only requires `name`, but
   // readiness blocks submission without operator, dates and a type.
   name: "",
@@ -89,9 +31,10 @@ export const getInitialWizardForm = (operatorId) => ({
   website: "",
   image: "",
   hero_image: "",
-  media_links: "",
+  media_links: [],
   technologies_practices_processes: "",
   cobenefits: "",
+  sustainable_development_goals: "",
   city: "",
   country_code: "",
   term_commitment: "",
@@ -101,22 +44,7 @@ export const getInitialWizardForm = (operatorId) => ({
   monitoring_period_end_date: "",
   certification_scheme_id: "",
   certification_scheme_name: "",
-  activityPlanTitle: planTemplateFor(null).activityPlanTitle,
-  monitoringPlanTitle: planTemplateFor(null).monitoringPlanTitle,
 });
-
-export const getRiskColor = (risk) => {
-  if (risk === "Low") return "positive";
-  if (risk === "Medium") return "warning";
-  return "critical";
-};
-
-export const getCertStatusPill = (status) => {
-  if (status.includes("Certified")) return "positive";
-  if (status.includes("Review")) return "warning";
-  if (status.includes("Pending")) return "neutral";
-  return "critical";
-};
 
 export const getPhaseLabel = (phase) => {
   if (phase === "initialization") return "Initialization";

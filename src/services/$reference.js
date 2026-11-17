@@ -4,6 +4,7 @@ import api, { toList } from "./$api";
 // answers are memoised for the lifetime of the page.
 let referenceCache = null;
 let countriesCache = null;
+let vocabulariesCache = null;
 
 class $reference {
   /**
@@ -28,6 +29,22 @@ class $reference {
     countriesCache = toList(data);
 
     return countriesCache;
+  }
+
+  /**
+   * DCR's controlled vocabularies: countries, sustainable_development_goals
+   * (with an `icon`), technologies_practices_processes and co_benefits, each a
+   * list of `{value, label}` where `value` is the DCR id to store. `sources`
+   * says per list whether it came from `dcr`, the `local` fallback, or is
+   * `unavailable`.
+   */
+  async vocabularies({ refresh = false } = {}) {
+    if (vocabulariesCache && !refresh) return vocabulariesCache;
+
+    const { data } = await api.get('/reference/vocabularies/');
+    vocabulariesCache = data;
+
+    return vocabulariesCache;
   }
 
   async health() {
@@ -61,12 +78,23 @@ export const ACTIVITY_TYPES = [
   'CARBON_STORAGE_IN_PRODUCTS',
 ];
 
-export const PROJECT_STATUSES = ['draft', 'ready', 'submitted', 'accepted', 'rejected'];
+export const PROJECT_STATUSES = ['draft', 'ready', 'submitted', 'changes_requested', 'accepted', 'rejected'];
 
 export const DCR_SYNC_STATUSES = ['local', 'synced', 'failed'];
 
 export const FORWARD_STATUSES = ['local', 'forwarded', 'failed'];
 
-export const VERIFICATION_STATUSES = ['in_progress', 'verified', 'failed'];
+export const VERIFICATION_STATUSES = [
+  'draft',
+  'pending',
+  'under_review',
+  'validated',
+  'validation_amendment_required',
+  'denied',
+  'in_progress',
+  'verification_amendment_required',
+  'verified',
+  'failed',
+];
 
 export default new $reference();

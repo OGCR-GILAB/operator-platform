@@ -1,4 +1,4 @@
-import { LogoMark } from "./Logo";
+import { LogoMark } from "@majistudio/ogcr-design-system";
 
 function Footer(props) {
   const {

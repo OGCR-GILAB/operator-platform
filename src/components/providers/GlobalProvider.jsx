@@ -35,40 +35,41 @@ const loggedOutState = {
   operatorStatus: 'idle',
 };
 
+/**
+ * The operator slice of the app state, read from the API. Returns the patch
+ * instead of applying it, so the initial load can run from an effect without a
+ * synchronous setState. `null` on a 401, which is handled globally.
+ */
+async function fetchOperatorState() {
+  try {
+    // The API already scopes /operators/ to the operators the current user belongs to.
+    const operators = toList(await $operators.list());
+    const operatorRecord = operators[0];
+
+    if (!operatorRecord) {
+      return { operator: null, operatorId: null, relationship: null, operatorStatus: 'missing' };
+    }
+
+    return {
+      operator: operatorRecord,
+      operatorId: operatorRecord.id,
+      relationship: operatorRecord.my_relationship || null,
+      operatorStatus: 'linked',
+    };
+  } catch (err) {
+    if (err?.response?.status === 401) return null;
+    return { operatorStatus: 'error' };
+  }
+}
+
 export const GlobalProvider = ({ children }) => {
   const [appState, setAppState] = useState(getInitialAppState);
 
   const loadOperator = useCallback(async () => {
     setAppState((current) => ({ ...current, operatorStatus: 'checking' }));
 
-    try {
-      // The API already scopes /operators/ to the operators the current user belongs to.
-      const operators = toList(await $operators.list());
-      const operatorRecord = operators[0];
-
-      if (!operatorRecord) {
-        setAppState((current) => ({
-          ...current,
-          operator: null,
-          operatorId: null,
-          relationship: null,
-          operatorStatus: 'missing',
-        }));
-        return;
-      }
-
-      setAppState((current) => ({
-        ...current,
-        operator: operatorRecord,
-        operatorId: operatorRecord.id,
-        relationship: operatorRecord.my_relationship || null,
-        operatorStatus: 'linked',
-      }));
-    } catch (err) {
-      // A 401 is already handled globally below; anything else is a real failure.
-      if (err?.response?.status === 401) return;
-      setAppState((current) => ({ ...current, operatorStatus: 'error' }));
-    }
+    const next = await fetchOperatorState();
+    if (next) setAppState((current) => ({ ...current, ...next }));
   }, []);
 
   // A 401 on *any* call means the token is gone: drop the session everywhere.
@@ -129,12 +130,22 @@ export const GlobalProvider = ({ children }) => {
     }
   }, [applyMe]);
 
-  useEffect(() => {
-    if (!appState.me?.id) return;
-    if (appState.operatorStatus !== 'idle') return;
+  // First operator read after sign-in. Status stays `idle` while it runs; keyed
+  // on the id so a refreshed `me` does not start a second read, and a response
+  // that lands after logout is dropped.
+  const meId = appState.me?.id;
 
-    loadOperator();
-  }, [appState.me, appState.operatorStatus, loadOperator]);
+  useEffect(() => {
+    if (!meId || appState.operatorStatus !== 'idle') return undefined;
+
+    let cancelled = false;
+
+    fetchOperatorState().then((next) => {
+      if (!cancelled && next) setAppState((current) => ({ ...current, ...next }));
+    });
+
+    return () => { cancelled = true; };
+  }, [meId, appState.operatorStatus]);
 
   const logout = useCallback(() => {
     $auth.logout();
@@ -174,6 +185,7 @@ export const GlobalProvider = ({ children }) => {
     dcrState: dcrAccountState(appState.me, appState.meStatus),
     dcrCapabilities: capabilitiesOf(appState.me),
     onUpdateGlobal: setAppState,
+    applyMe,
     logout,
     acknowledgeSessionExpiry,
     refreshMe,

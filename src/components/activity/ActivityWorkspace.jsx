@@ -1,10 +1,9 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeftIcon } from "@phosphor-icons/react";
-import Button from "../ui/Button";
+import { Button, Message, Pill } from "@majistudio/ogcr-design-system";
 import RouteTransition from "../ui/RouteTransition";
-import Skeleton, { SkeletonBlock } from "../ui/Skeleton";
-import Message from "../ui/Message";
-import Pill from "../ui/Pill";
+import { Skeleton } from "@majistudio/ogcr-design-system";
+import { SkeletonBlock } from "../ui/Skeleton";
 import ActivityLifecycleIndicator from "../projects/ProjectLifecycleIndicator";
 import { useActivity } from "./ActivityContext";
 import {
@@ -24,7 +23,7 @@ import {
 function ActivityWorkspace() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { activity, status, error, notFound } = useActivity();
+  const { activity, documentTotal, status, error, notFound } = useActivity();
 
   // The tab is the last segment. Changing it crossfades the body below the
   // header; the header itself belongs to the activity and does not move.
@@ -34,14 +33,14 @@ function ActivityWorkspace() {
     return (
       <div className="ogcr-projects">
         <Message
-          variant="error"
+          state="error"
           title="That activity does not exist"
           description="It may have been deleted, or the link is wrong."
         />
         <div>
           <Button
             variant="outlined"
-            startIcon={<ArrowLeftIcon size={16} />}
+            iconLeft={<ArrowLeftIcon size={16} />}
             onClick={() => navigate("/activities")}
           >
             Back to activities
@@ -54,11 +53,11 @@ function ActivityWorkspace() {
   if (status === "error") {
     return (
       <div className="ogcr-projects">
-        <Message variant="error" title="Could not load this activity" description={error} />
+        <Message state="error" title="Could not load this activity" description={error} />
         <div>
           <Button
             variant="outlined"
-            startIcon={<ArrowLeftIcon size={16} />}
+            iconLeft={<ArrowLeftIcon size={16} />}
             onClick={() => navigate("/activities")}
           >
             Back to activities
@@ -82,16 +81,16 @@ function ActivityWorkspace() {
               <h1 className="ogcr-activity-header__name" style={{ width: "22ch" }}>
                 <Skeleton height="1.2em" />
               </h1>
-              <Skeleton width="9ch" height="1.6em" radius="var(--radius-full)" delay={90} />
-              <Skeleton width="7ch" height="1.6em" radius="var(--radius-full)" delay={180} />
+              <Skeleton variant="circular" width="9ch" height="1.6em" />
+              <Skeleton variant="circular" width="7ch" height="1.6em" />
             </div>
 
             <p className="ogcr-activity-header__meta" style={{ width: "34ch" }}>
-              <Skeleton height="1.5em" delay={120} />
+              <Skeleton height="1.5em" />
             </p>
           </div>
 
-          <Skeleton width="min(320px, 100%)" height="2.2em" radius="var(--radius-full)" delay={200} />
+          <Skeleton variant="circular" width="min(320px, 100%)" height="2.2em" />
         </header>
 
         <SkeletonBlock rows={4} />
@@ -100,7 +99,7 @@ function ActivityWorkspace() {
   }
 
   const parcels = Number(activity.parcel_count) || 0;
-  const documents = Number(activity.document_count) || 0;
+  const documents = documentTotal;
 
   return (
     <div className="ogcr-projects">

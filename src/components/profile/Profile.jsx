@@ -1,17 +1,22 @@
-import { useEffect, useState } from "react";
-import Card from "../ui/Card";
-import TextField from "../ui/TextField";
-import Select from "../ui/Select";
-import Button from "../ui/Button";
-import Checkbox from "../ui/Checkbox";
-import Modal from "../ui/Modal";
+import { useState } from "react";
+import { Button, Card, Input, Message, Select } from "@majistudio/ogcr-design-system";
+import ContactPhoneField from "../ui/ContactPhoneField";
+import { joinPhone, splitPhone } from "../ui/phone";
 import DcrAccountCard from "./DcrAccountCard";
+import usePasswordPolicy from "../auth/usePasswordPolicy";
 import DcrRegistryCard from "./DcrRegistryCard";
+import OperatorMembersCard from "./OperatorMembersCard";
+import useOperatorDcr from "./useOperatorDcr";
 import { useToast } from "../providers/ToastContext";
 import { useGlobal } from "../providers/GlobalContext";
-import { euAndCandidateCountryOptions } from "../projects/activityConfig";
+import useCountryOptions from "../projects/useCountryOptions";
 import $auth from "../../services/$auth";
-import $operators from "../../services/$operators";
+import $operators, { OPERATOR_DCR_STATES } from "../../services/$operators";
+import { syncStateOf } from "../../models/document";
+import Dialog from "../ui/Dialog";
+
+// Never sent to DCR: nothing to read, and nothing about it is a failure.
+const NOT_ON_DCR = { state: OPERATOR_DCR_STATES.unregistered, data: null, error: null, reload: () => {} };
 
 function getInitials(name = "") {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -19,109 +24,71 @@ function getInitials(name = "") {
   return `${parts[0][0] || ""}${parts[1]?.[0] || ""}`.toUpperCase();
 }
 
-const emptyOperatorForm = {
-  legal_name: "",
-  address_line_1: "",
-  address_line_2: "",
-  postcode: "",
-  country_code: "",
-  ogcr_wallet_address: "",
-};
+function operatorFormFrom(operator) {
+  const { countryCode, number } = splitPhone(operator?.phone);
 
-function Profile() {
-  const {
-    user,
-    me,
-    meStatus,
-    operator,
-    operatorId,
-    relationship,
-    operatorStatus,
-    onUpdateGlobal,
-    logout,
-    refreshOperator,
-    deleteOperatorProfile,
-  } = useGlobal();
+  return {
+    legal_name: operator?.legal_name || "",
+    address_line_1: operator?.address_line_1 || "",
+    address_line_2: operator?.address_line_2 || "",
+    postcode: operator?.postcode || "",
+    country_code: operator?.country_code || "",
+    phone_code: countryCode,
+    phone_number: number,
+  };
+}
+
+/**
+ * Keyed on the operator's `updated_at` by the caller, so a saved or re-read
+ * record starts a fresh form instead of being copied into state by an effect.
+ */
+function OperatorProfileForm({ operator, operatorId, registry, onDelete }) {
+  const { me, meStatus, relationship, refreshOperator } = useGlobal();
   const { showToast } = useToast();
 
-  const [operatorForm, setOperatorForm] = useState(emptyOperatorForm);
-  const [savingOperator, setSavingOperator] = useState(false);
+  const countryOptions = useCountryOptions();
+  const [form, setForm] = useState(() => operatorFormFrom(operator));
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!operator) return;
-
-    setOperatorForm({
-      legal_name: operator.legal_name || "",
-      address_line_1: operator.address_line_1 || "",
-      address_line_2: operator.address_line_2 || "",
-      postcode: operator.postcode || "",
-      country_code: operator.country_code || "",
-      ogcr_wallet_address: operator.ogcr_wallet_address || "",
-    });
-  }, [operator]);
-
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: "",
-    newPassword: "",
-    confirmPassword: "",
-  });
-
-  const [preferences, setPreferences] = useState({
-    emailUpdates: Boolean(user?.preferences?.emailUpdates ?? true),
-    securityAlerts: Boolean(user?.preferences?.securityAlerts ?? true),
-    productTips: Boolean(user?.preferences?.productTips ?? false),
-  });
-
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [deleteConfirmValue, setDeleteConfirmValue] = useState("");
-
-  const [isDeleteProfileModalOpen, setIsDeleteProfileModalOpen] = useState(false);
-  const [deleteProfileConfirmValue, setDeleteProfileConfirmValue] = useState("");
-  const [deletingProfile, setDeletingProfile] = useState(false);
-
-  const initials = getInitials(operator?.legal_name || me?.username);
-
-  const handleOperatorFieldChange = (key) => (event) => {
-    setOperatorForm((prev) => ({
-      ...prev,
-      [key]: event.target.value,
-    }));
+  const handleFieldChange = (key) => (event) => {
+    setForm((prev) => ({ ...prev, [key]: event.target.value }));
   };
 
-  const handlePasswordChange = (key) => (event) => {
-    setPasswordForm((prev) => ({
-      ...prev,
-      [key]: event.target.value,
-    }));
-  };
+  // Assigned by DCR when the operator is first registered, never typed in here.
+  const registryWallet = registry.data?.ogcr_wallet_address
+    || registry.data?.record?.ogcr_wallet_address
+    || "";
 
-  const handlePreferenceChange = (key) => (event) => {
-    setPreferences((prev) => ({
-      ...prev,
-      [key]: event.target.checked,
-    }));
-  };
+  const walletHelper = {
+    registered: registryWallet ? "Assigned by the DCR registry." : "The registry has not assigned a wallet yet.",
+    unregistered: "Assigned by the DCR registry on your first project submit.",
+    unavailable: "The registry could not be read just now.",
+    error: "The registry could not be read just now.",
+  }[registry.state] || "Reading the registry…";
 
-  const handleOperatorSubmit = async (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
     if (!operatorId) return;
 
-    setSavingOperator(true);
+    setSaving(true);
 
     try {
+      const { phone_code, phone_number, ...fields } = form;
+
       // The operator e-mail tracks the account e-mail, but a `me` restored from
       // sessionStorage can be out of date — re-asserting it from a stale copy
       // would write an old address back. PATCH, so omitting it simply leaves
       // the stored value alone.
       await $operators.patch(operatorId, {
-        ...operatorForm,
+        ...fields,
+        phone: joinPhone(phone_code, phone_number),
         ...(meStatus === 'fresh' && me?.email ? { email: me.email } : {}),
       });
       await refreshOperator();
 
       showToast({
-        variant: "positive",
+        variant: "success",
         title: "Profile information updated",
         description: "Your Operator profile has been saved.",
       });
@@ -132,82 +99,200 @@ function Profile() {
         description: $auth.getErrorMessage(err),
       });
     } finally {
-      setSavingOperator(false);
+      setSaving(false);
     }
   };
 
-  const handlePasswordSubmit = (event) => {
-    event.preventDefault();
+  return (
+    <form className="ogcr-profile__form" onSubmit={handleSubmit}>
+      <Input
+        label="Legal name"
+        value={form.legal_name}
+        onChange={handleFieldChange("legal_name")}
+        placeholder="e.g., Agreena, or John Smith"
+        required
+      />
 
-    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-      showToast({
-        variant: "warning",
-        title: "Missing fields",
-        description: "Please complete all password fields.",
+      <Input
+        type="email"
+        label="Email"
+        value={me?.email || ""}
+        onChange={() => {}}
+        disabled
+        helperText="Taken from your account email."
+      />
+
+      <ContactPhoneField
+        label="Phone"
+        countryCode={form.phone_code}
+        phone={form.phone_number}
+        onCountryCodeChange={(value) => setForm((prev) => ({ ...prev, phone_code: value }))}
+        onPhoneChange={(value) => setForm((prev) => ({ ...prev, phone_number: value }))}
+      />
+
+      <Input
+        label="Address line 1"
+        value={form.address_line_1}
+        onChange={handleFieldChange("address_line_1")}
+        placeholder="Green Street, 20"
+        required
+      />
+      <Input
+        label="Address line 2"
+        value={form.address_line_2}
+        onChange={handleFieldChange("address_line_2")}
+        placeholder="Suite 400"
+      />
+
+      <div className="ogcr-profile__row">
+        <Input
+          label="Postcode"
+          value={form.postcode}
+          onChange={handleFieldChange("postcode")}
+          placeholder="10115"
+          required
+        />
+        <Select
+          label="Country"
+          value={form.country_code || null}
+          onValueChange={(value) => setForm((prev) => ({ ...prev, country_code: value }))}
+          options={countryOptions}
+          placeholder="Select country"
+          required
+        />
+      </div>
+
+      <Input
+        label="OGCR wallet address"
+        value={registryWallet}
+        onChange={() => {}}
+        placeholder={registry.state === "unregistered" ? "Assigned on first submit" : "—"}
+        disabled
+        helperText={walletHelper}
+      />
+
+      {relationship && (
+        <p className="ogcr-card__subtitle">Your role: <strong>{relationship}</strong></p>
+      )}
+
+      <div className="ogcr-profile__actions">
+        <Button type="submit" disabled={saving}>
+          {saving ? "Saving..." : "Save profile information"}
+        </Button>
+        <Button
+          type="button"
+          variant="outlined"
+          disabled={saving}
+          onClick={onDelete}
+        >
+          Delete profile information
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * DCR has no "change password" call — the only way to set a new one is the
+ * e-mailed reset link, so that is what this card offers.
+ */
+function PasswordCard() {
+  const { me } = useGlobal();
+  const { description: passwordRules } = usePasswordPolicy();
+
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  // Always 202 by design; 503 while the deployment lacks its DCR service account.
+  const handleReset = async () => {
+    if (!me?.email) return;
+
+    setNotice(null);
+    setSending(true);
+
+    try {
+      await $auth.passwordReset(me.email);
+      setNotice({
+        variant: "success",
+        title: "Check your e-mail",
+        description: `A reset link is on its way to ${me.email}.`,
       });
-      return;
+    } catch (err) {
+      if (err?.response?.status === 401) return;
+      setNotice(err?.response?.status === 503
+        ? {
+          variant: "warning",
+          title: "Not available yet",
+          description: "Password resets are not configured on this deployment. Please contact your administrator.",
+        }
+        : {
+          variant: "error",
+          title: "Could not send the reset link",
+          description: $auth.getErrorMessage(err),
+        });
+    } finally {
+      setSending(false);
     }
-
-    if (passwordForm.newPassword.length < 8) {
-      showToast({
-        variant: "warning",
-        title: "Weak password",
-        description: "New password must be at least 8 characters.",
-      });
-      return;
-    }
-
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      showToast({
-        variant: "warning",
-        title: "Password mismatch",
-        description: "New password and confirmation do not match.",
-      });
-      return;
-    }
-
-    setPasswordForm({
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: "",
-    });
-
-    showToast({
-      variant: "positive",
-      title: "Password changed",
-      description: "Your password has been updated successfully.",
-    });
   };
 
-  const handlePreferencesSubmit = (event) => {
-    event.preventDefault();
+  return (
+    <Card
+      className="ogcr-profile__card"
+      title="Password"
+      subtitle="Your password is managed by the DCR platform."
+    >
+      <div className="ogcr-profile__form">
+        <p className="ogcr-card__subtitle">
+          To change it, we e-mail you a reset link. {passwordRules}
+        </p>
 
-    onUpdateGlobal?.((prev) => ({
-      ...prev,
-      user: {
-        ...(prev?.user || {}),
-        preferences,
-      },
-    }));
+        {notice && (
+          <Message
+            state={notice.variant}
+            title={notice.title}
+            description={notice.description}
+            onDismiss={() => setNotice(null)}
+          />
+        )}
 
-    showToast({
-      variant: "positive",
-      title: "Preferences saved",
-      description: "Notification preferences were updated.",
-    });
-  };
+        <div className="ogcr-profile__actions">
+          <Button type="button" onClick={handleReset} disabled={sending || !me?.email}>
+            {sending ? "Sending..." : "Send password reset link"}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
-  const handleDeleteAccount = () => {
-    logout();
+function Profile() {
+  const {
+    me,
+    operator,
+    operatorId,
+    operatorStatus,
+    deleteOperatorProfile,
+  } = useGlobal();
+  const { showToast } = useToast();
 
-    setIsDeleteModalOpen(false);
-    setDeleteConfirmValue("");
+  // Read once here and shared, so the wallet field and the registry card do not
+  // each hit DCR for the same record. `dcr_id` is assigned before anything is
+  // sent, so it says nothing about registration; a never-sent operator skips
+  // the read, and any other answers 404 -> `unregistered` if DCR has no record.
+  const isLinked = operatorStatus === 'linked';
+  const neverSent = syncStateOf(operator) === 'local' && !operator?.dcr_synced_at;
+  const dcrRead = useOperatorDcr(isLinked && !neverSent ? operatorId : null);
+  const registry = isLinked && neverSent ? NOT_ON_DCR : dcrRead;
 
-    showToast({
-      variant: "warning",
-      title: "Account deleted",
-      description: "Your account has been removed.",
-    });
+  const [isDeleteProfileModalOpen, setIsDeleteProfileModalOpen] = useState(false);
+  const [deleteProfileConfirmValue, setDeleteProfileConfirmValue] = useState("");
+  const [deletingProfile, setDeletingProfile] = useState(false);
+
+  const initials = getInitials(operator?.legal_name || me?.username);
+
+  const closeDeleteProfile = () => {
+    setIsDeleteProfileModalOpen(false);
+    setDeleteProfileConfirmValue("");
   };
 
   const handleDeleteProfileInfo = async () => {
@@ -216,8 +301,7 @@ function Profile() {
     try {
       await deleteOperatorProfile();
 
-      setIsDeleteProfileModalOpen(false);
-      setDeleteProfileConfirmValue("");
+      closeDeleteProfile();
 
       showToast({
         variant: "warning",
@@ -235,7 +319,6 @@ function Profile() {
     }
   };
 
-  const isDeleteEnabled = deleteConfirmValue.trim().toUpperCase() === "DELETE";
   const isDeleteProfileEnabled = deleteProfileConfirmValue.trim().toUpperCase() === "DELETE";
 
   return (
@@ -245,7 +328,7 @@ function Profile() {
         <div>
           <h2 className="ogcr-profile__title">Account Settings</h2>
           <p className="ogcr-profile__subtitle">
-            Manage your Operator profile, security credentials and account preferences.
+            Manage your Operator profile, its members and your sign-in.
           </p>
           <p className="ogcr-profile__meta">
             Signed in as <strong>{me?.username || " - "}</strong> · {me?.email || " - "}
@@ -259,7 +342,7 @@ function Profile() {
           title="Profile Information"
           subtitle="The Operator profile linked to your account."
         >
-          {operatorStatus === 'checking' && (
+          {(operatorStatus === 'idle' || operatorStatus === 'checking') && (
             <p className="ogcr-card__subtitle">Loading operator profile...</p>
           )}
 
@@ -276,249 +359,55 @@ function Profile() {
           )}
 
           {operatorStatus === 'linked' && (
-            <form className="ogcr-profile__form" onSubmit={handleOperatorSubmit}>
-              <TextField
-                label="Legal name"
-                value={operatorForm.legal_name}
-                onChange={handleOperatorFieldChange("legal_name")}
-                placeholder="e.g., Agreena, or John Smith"
-                required
-              />
-
-              <TextField
-                type="email"
-                label="Email"
-                value={me?.email || ""}
-                onChange={() => {}}
-                disabled
-                helperText="Taken from your account email."
-              />
-
-              <TextField
-                label="Address line 1"
-                value={operatorForm.address_line_1}
-                onChange={handleOperatorFieldChange("address_line_1")}
-                placeholder="Green Street, 20"
-                required
-              />
-              <TextField
-                label="Address line 2"
-                value={operatorForm.address_line_2}
-                onChange={handleOperatorFieldChange("address_line_2")}
-                placeholder="Suite 400"
-              />
-
-              <div className="ogcr-profile__row">
-                <TextField
-                  label="Postcode"
-                  value={operatorForm.postcode}
-                  onChange={handleOperatorFieldChange("postcode")}
-                  placeholder="10115"
-                  required
-                />
-                <Select
-                  label="Country"
-                  value={operatorForm.country_code}
-                  onChange={handleOperatorFieldChange("country_code")}
-                  options={euAndCandidateCountryOptions}
-                  placeholder="Select country"
-                  required
-                />
-              </div>
-
-              <TextField
-                label="OGCR wallet address"
-                value={operatorForm.ogcr_wallet_address}
-                onChange={handleOperatorFieldChange("ogcr_wallet_address")}
-                placeholder="0x..."
-                required
-              />
-
-              {relationship && (
-                <p className="ogcr-card__subtitle">Your role: <strong>{relationship}</strong></p>
-              )}
-
-              <div className="ogcr-profile__actions">
-                <Button type="submit" disabled={savingOperator}>
-                  {savingOperator ? "Saving..." : "Save profile information"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outlined"
-                  tone="negative"
-                  disabled={savingOperator}
-                  onClick={() => setIsDeleteProfileModalOpen(true)}
-                >
-                  Delete profile information
-                </Button>
-              </div>
-            </form>
+            <OperatorProfileForm
+              key={`${operator?.id}:${operator?.updated_at}`}
+              operator={operator}
+              operatorId={operatorId}
+              registry={registry}
+              onDelete={() => setIsDeleteProfileModalOpen(true)}
+            />
           )}
         </Card>
 
         {/*
-          Roles, capabilities and provider ids are diagnostic detail — useful
-          while wiring up DCR, noise for an operator. Dev builds only.
+          Up front, why submit may be refused: the roles DCR grants this account
+          and what they allow, checked live.
         */}
-        {import.meta.env.DEV && <DcrAccountCard />}
+        <DcrAccountCard />
 
         {operatorStatus === 'linked' && (
-          <DcrRegistryCard operator={operator} operatorId={operatorId} />
+          <DcrRegistryCard operator={operator} registry={registry} />
         )}
 
-        <Card
-          className="ogcr-profile__card"
-          title="Change Password"
-          subtitle="Keep your account secure with a strong password."
-        >
-          <form className="ogcr-profile__form" onSubmit={handlePasswordSubmit}>
-            <TextField
-              type="password"
-              label="Current password"
-              value={passwordForm.currentPassword}
-              onChange={handlePasswordChange("currentPassword")}
-              required
-            />
-            <TextField
-              type="password"
-              label="New password"
-              helperText="Use at least 8 characters."
-              value={passwordForm.newPassword}
-              onChange={handlePasswordChange("newPassword")}
-              required
-            />
-            <TextField
-              type="password"
-              label="Confirm new password"
-              value={passwordForm.confirmPassword}
-              onChange={handlePasswordChange("confirmPassword")}
-              required
-            />
+        {operatorStatus === 'linked' && (
+          <OperatorMembersCard operatorId={operatorId} />
+        )}
 
-            <div className="ogcr-profile__actions">
-              <Button type="submit">Update password</Button>
-            </div>
-          </form>
-        </Card>
-
-        <Card
-          className="ogcr-profile__card"
-          title="Notification Preferences"
-          subtitle="Choose what updates you receive."
-        >
-          <form className="ogcr-profile__form" onSubmit={handlePreferencesSubmit}>
-            <div className="ogcr-profile__checks">
-              <Checkbox
-                checked={preferences.emailUpdates}
-                onChange={handlePreferenceChange("emailUpdates")}
-                label="Operational updates"
-                description="Status and workflow notifications."
-              />
-              <Checkbox
-                checked={preferences.securityAlerts}
-                onChange={handlePreferenceChange("securityAlerts")}
-                label="Security alerts"
-                description="Sign-ins, suspicious activity and changes."
-              />
-              <Checkbox
-                checked={preferences.productTips}
-                onChange={handlePreferenceChange("productTips")}
-                label="Product tips"
-                description="Feature tips and usage best practices."
-              />
-            </div>
-
-            <div className="ogcr-profile__actions">
-              <Button variant="outlined" type="submit">Save preferences</Button>
-            </div>
-          </form>
-        </Card>
-
-        <Card
-          className="ogcr-profile__card ogcr-profile__card--danger"
-          title="Danger Zone"
-          subtitle="Delete your account and all associated data."
-        >
-          <div className="ogcr-profile__danger">
-            <p className="ogcr-profile__danger-text">
-              This action is permanent and cannot be undone.
-            </p>
-            <Button
-              type="button"
-              tone="negative"
-              onClick={() => setIsDeleteModalOpen(true)}
-            >
-              Delete account
-            </Button>
-          </div>
-        </Card>
+        <PasswordCard />
       </div>
 
-      <Modal
-        isOpen={isDeleteModalOpen}
-        onClose={() => {
-          setIsDeleteModalOpen(false);
-          setDeleteConfirmValue("");
-        }}
-        title="Delete account"
-        subtitle="Type DELETE to confirm account deletion."
-        primaryAction={{
-          label: "Delete permanently",
-          onClick: handleDeleteAccount,
-          disabled: !isDeleteEnabled,
-          tone: "negative",
-        }}
-        secondaryAction={{
-          label: "Cancel",
-          onClick: () => {
-            setIsDeleteModalOpen(false);
-            setDeleteConfirmValue("");
-          },
-          variant: "outlined",
-        }}
-      >
-        <TextField
-          label="Confirmation"
-          placeholder="Type DELETE"
-          value={deleteConfirmValue}
-          onChange={(event) => setDeleteConfirmValue(event.target.value)}
-          helperText="This action removes your profile from Operator Platform."
-        />
-      </Modal>
-
-      <Modal
-        isOpen={isDeleteProfileModalOpen}
-        onClose={() => {
-          if (deletingProfile) return;
-          setIsDeleteProfileModalOpen(false);
-          setDeleteProfileConfirmValue("");
-        }}
+      <Dialog
+        open={isDeleteProfileModalOpen}
+        onOpenChange={(open) => { if (!open && !deletingProfile) closeDeleteProfile(); }}
+        size="m"
         title="Delete profile information"
-        subtitle="Type DELETE to confirm removing your Operator profile."
+        description="Type DELETE to confirm removing your Operator profile."
         primaryAction={{
           label: deletingProfile ? "Deleting..." : "Delete permanently",
           onClick: handleDeleteProfileInfo,
           disabled: !isDeleteProfileEnabled || deletingProfile,
-          tone: "negative",
+          closeOnClick: false,
         }}
-        secondaryAction={{
-          label: "Cancel",
-          onClick: () => {
-            setIsDeleteProfileModalOpen(false);
-            setDeleteProfileConfirmValue("");
-          },
-          variant: "outlined",
-          disabled: deletingProfile,
-        }}
+        secondaryAction={{ label: "Cancel", disabled: deletingProfile }}
       >
-        <TextField
+        <Input
           label="Confirmation"
           placeholder="Type DELETE"
           value={deleteProfileConfirmValue}
           onChange={(event) => setDeleteProfileConfirmValue(event.target.value)}
           helperText="This removes your Operator and its link to your account. You will need to set it up again."
         />
-      </Modal>
+      </Dialog>
     </div>
   );
 }

@@ -13,7 +13,7 @@ function ActivitiesPortfolioStats(props) {
   const { activities = [], totalAreaHa = null } = props;
 
   const submitted = activities.filter((activity) => activity.submitted_at
-    || ["submitted", "accepted", "rejected"].includes(activity.status)).length;
+    || ["submitted", "changes_requested", "accepted", "rejected"].includes(activity.status)).length;
   const accepted = activities.filter((activity) => activity.status === "accepted").length;
   const rejected = activities.filter((activity) => activity.status === "rejected").length;
   const totalParcels = activities.reduce(

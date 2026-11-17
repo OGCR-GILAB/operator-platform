@@ -1,92 +1,50 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Message from "../ui/Message";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { ToastProvider as DsToastProvider, useToast as useDsToast } from "@majistudio/ogcr-design-system";
 import { ToastContext } from "./ToastContext";
 
 const DEFAULT_TOAST_AUTO_CLOSE = 5000;
 
-export const ToastProvider = ({ children }) => {
-  const [toasts, setToasts] = useState([]);
-  const toastIdRef = useRef(0);
-  const timeoutMapRef = useRef(new Map());
+/**
+ * The app's `showToast({ variant, title, description, duration })` API on top
+ * of the DS toast manager. The callbacks stay stable: callers list them as
+ * effect dependencies.
+ */
+function ToastBridge({ children }) {
+  const manager = useDsToast();
+  const managerRef = useRef(manager);
 
-  const removeToast = useCallback((id) => {
-    const timeoutId = timeoutMapRef.current.get(id);
+  useEffect(() => {
+    managerRef.current = manager;
+  }, [manager]);
 
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      timeoutMapRef.current.delete(id);
-    }
+  const showToast = useCallback(({ variant, title, description, autoClose, duration }) => {
+    const timeout = autoClose ?? duration ?? DEFAULT_TOAST_AUTO_CLOSE;
 
-    setToasts((current) => current.filter((toast) => toast.id !== id));
+    return managerRef.current.add({
+      type: variant,
+      title,
+      description,
+      // `autoClose: false` keeps a toast until it is closed; 0 means the same to the DS.
+      timeout: typeof timeout === "number" ? timeout : 0,
+    });
   }, []);
+
+  const removeToast = useCallback((id) => managerRef.current.close(id), []);
 
   const clearToasts = useCallback(() => {
-    timeoutMapRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
-    timeoutMapRef.current.clear();
-    setToasts([]);
-  }, []);
-
-  const showToast = useCallback(
-    ({ autoClose, duration, ...toast }) => {
-      const resolvedAutoClose =
-        autoClose !== undefined
-          ? autoClose
-          : duration !== undefined
-            ? duration
-            : DEFAULT_TOAST_AUTO_CLOSE;
-
-      const id = ++toastIdRef.current;
-
-      setToasts((current) => [...current, { ...toast, id }]);
-
-      if (typeof resolvedAutoClose === "number" && resolvedAutoClose > 0) {
-        const timeoutId = window.setTimeout(() => {
-          removeToast(id);
-        }, resolvedAutoClose);
-
-        timeoutMapRef.current.set(id, timeoutId);
-      }
-
-      return id;
-    },
-    [removeToast],
-  );
-
-  useEffect(() => () => {
-    timeoutMapRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
-    timeoutMapRef.current.clear();
+    managerRef.current.toasts.forEach((toast) => managerRef.current.close(toast.id));
   }, []);
 
   const value = useMemo(
-    () => ({
-      toasts,
-      showToast,
-      removeToast,
-      clearToasts,
-    }),
-    [toasts, showToast, removeToast, clearToasts],
+    () => ({ showToast, removeToast, clearToasts }),
+    [showToast, removeToast, clearToasts],
   );
 
-  return (
-    <ToastContext.Provider value={value}>
-      {children}
-      <div className="ogcr-toast-viewport" aria-live="polite" aria-atomic="false">
-        {toasts.map((toast) => (
-          <Message
-            key={toast.id}
-            variant={toast.variant}
-            title={toast.title}
-            description={toast.description}
-            action={toast.action}
-            actionLabel={toast.actionLabel}
-            onAction={toast.onAction}
-            closeLabel={toast.closeLabel}
-            floating
-            onClose={() => removeToast(toast.id)}
-            className="ogcr-toast-viewport__item"
-          />
-        ))}
-      </div>
-    </ToastContext.Provider>
-  );
-};
+  return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
+}
+
+export const ToastProvider = ({ children }) => (
+  <DsToastProvider timeout={DEFAULT_TOAST_AUTO_CLOSE}>
+    <ToastBridge>{children}</ToastBridge>
+  </DsToastProvider>
+);

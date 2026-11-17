@@ -1,5 +1,5 @@
-import { Logo } from "./Logo";
 import Loader from "./Loader";
+import { Logo } from "@majistudio/ogcr-design-system";
 
 function LoadingScreen(props) {
   const {

@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowClockwiseIcon, MagnifyingGlassIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
-import Button from "../ui/Button";
+import { ArrowClockwiseIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react";
+import { Button, Input, Message, Pill, ProgressBar, ToggleGroup } from "@majistudio/ogcr-design-system";
 import DataTable from "../ui/DataTable";
-import Message from "../ui/Message";
-import Pill from "../ui/Pill";
-import ProgressBar from "../ui/ProgressBar";
-import TextField from "../ui/TextField";
-import CreateActivityWizardModal from "./CreateProjectWizardModal";
+import CreateActivityModal from "./CreateActivityModal";
 import ActivitiesPortfolioStats from "./ProjectsPortfolioStats";
 import { useGlobal } from "../providers/GlobalContext";
 import { useToast } from "../providers/ToastContext";
@@ -32,12 +28,16 @@ const STATUS_CHIP_LABELS = {
   draft: "Draft",
   ready: "Ready",
   submitted: "Submitted",
+  changes_requested: "Changes requested",
   accepted: "Accepted",
   rejected: "Rejected",
 };
 
+// Toggle items need a value; this one stands for "no status filter".
+const ALL_STATUSES = "all";
+
 const statusFilterOptions = [
-  { value: "", label: "All" },
+  { value: ALL_STATUSES, label: "All" },
   ...Object.keys(PROJECT_STATUS_LABELS).map((value) => ({
     value,
     label: STATUS_CHIP_LABELS[value] || value,
@@ -200,7 +200,7 @@ function Activities() {
         cell: ({ row }) => (
           <Button
             variant="outlined"
-            size="sm"
+            size="s"
             onClick={() => openActivity(row.original.id)}
           >
             Open
@@ -220,14 +220,13 @@ function Activities() {
             Open an activity to work on its plans, parcels, documents and map.
           </p>
         </div>
-        <div className="flex flex-row items-center gap-2">
-          <Button variant="text" onClick={reload} startIcon={<ArrowClockwiseIcon size={16} />}>
+        <div className="flex flex-row items-center gap-8">
+          <Button variant="text" onClick={reload} iconLeft={<ArrowClockwiseIcon size={16} />}>
             Refresh
           </Button>
           <Button
             variant="filled"
-            tone="brand"
-            startIcon={<PlusIcon size={16} weight="bold" />}
+            iconLeft={<PlusIcon size={16} weight="bold" />}
             onClick={() => setIsCreateModalOpen(true)}
             disabled={!operatorId}
           >
@@ -238,7 +237,7 @@ function Activities() {
 
       {!operatorId && (
         <Message
-          variant="warning"
+          state="warning"
           title="No Operator profile yet"
           description="Activities belong to an Operator. Finish the Operator setup before creating one."
         />
@@ -246,10 +245,10 @@ function Activities() {
 
       {Boolean(error) && (
         <Message
-          variant="error"
+          state="error"
           title="Could not load activities"
           description={error}
-          onClose={() => setError("")}
+          onDismiss={() => setError("")}
         />
       )}
 
@@ -262,42 +261,29 @@ function Activities() {
           for two controls that explain themselves.
         */}
         <div className="ogcr-projects__toolbar">
-          <TextField
+          <Input
             className="ogcr-projects__search"
+            type="search"
             value={search}
             placeholder="Search activities by name, summary or city…"
             aria-label="Search activities"
-            startIcon={<MagnifyingGlassIcon size={16} />}
-            endIcon={search ? (
-              <button
-                type="button"
-                className="ogcr-projects__search-clear"
-                aria-label="Clear search"
-                onClick={() => { setPage(1); setStatus("loading"); setSearch(""); }}
-              >
-                <XIcon size={14} weight="bold" />
-              </button>
-            ) : null}
+            iconLeft={<MagnifyingGlassIcon size={16} />}
             onChange={(e) => { setPage(1); setStatus("loading"); setSearch(e.target.value); }}
           />
 
-          <div className="ogcr-projects__view-toggle" role="group" aria-label="Filter by status">
-            {statusFilterOptions.map((option) => (
-              <button
-                key={option.value || "all"}
-                type="button"
-                className={`ogcr-projects__view-btn${statusFilter === option.value ? " active" : ""}`}
-                aria-pressed={statusFilter === option.value}
-                onClick={() => {
-                  setPage(1);
-                  setStatus("loading");
-                  setStatusFilter(option.value);
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <ToggleGroup
+            appearance="segmented"
+            aria-label="Filter by status"
+            className="ogcr-projects__view-toggle"
+            value={[statusFilter || ALL_STATUSES]}
+            onValueChange={(next) => {
+              if (!next[0]) return;
+              setPage(1);
+              setStatus("loading");
+              setStatusFilter(next[0] === ALL_STATUSES ? "" : next[0]);
+            }}
+            items={statusFilterOptions}
+          />
         </div>
 
         {/*
@@ -310,7 +296,6 @@ function Activities() {
           data={activities}
           loading={status === "loading"}
           ariaLabel="Activities table"
-          onRowClick={(activity) => openActivity(activity.id)}
           emptyText={
             search || statusFilter
               ? "No activities match those filters."
@@ -319,14 +304,14 @@ function Activities() {
         />
 
         {(pageInfo.hasNext || pageInfo.hasPrevious) && (
-          <div className="flex flex-row items-center justify-between gap-2 pt-2">
+          <div className="flex flex-row items-center justify-between gap-8 pt-8">
             <span className="text-body-s ogcr-card__subtitle">
               {pageInfo.count} activit{pageInfo.count === 1 ? "y" : "ies"} in total
             </span>
-            <div className="flex flex-row gap-2">
+            <div className="flex flex-row gap-8">
               <Button
                 variant="outlined"
-                size="sm"
+                size="s"
                 disabled={!pageInfo.hasPrevious}
                 onClick={() => { setStatus("loading"); setPage((current) => Math.max(1, current - 1)); }}
               >
@@ -334,7 +319,7 @@ function Activities() {
               </Button>
               <Button
                 variant="outlined"
-                size="sm"
+                size="s"
                 disabled={!pageInfo.hasNext}
                 onClick={() => { setStatus("loading"); setPage((current) => current + 1); }}
               >
@@ -346,7 +331,7 @@ function Activities() {
       </section>
 
       {isCreateModalOpen && (
-        <CreateActivityWizardModal
+        <CreateActivityModal
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           user={me}

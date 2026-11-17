@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { useGlobal } from "../providers/GlobalContext";
 import { EnvelopeIcon, EyeClosedIcon, EyeIcon, LockIcon } from "@phosphor-icons/react";
-import Modal from "../ui/Modal";
-import TextField from "../ui/TextField";
-import Message from "../ui/Message";
 import { useToast } from "../providers/ToastContext";
 import { useNavigate } from "react-router-dom";
 import $auth from "../../services/$auth";
+import { Input, Message } from "@majistudio/ogcr-design-system";
+import useResendValidation from "./useResendValidation";
+import Dialog from "../ui/Dialog";
+
+// The API does not pin down how DCR refuses an unconfirmed address, so match
+// the code or the wording. "validat", not "valid": DCR's wrong-password reply
+// is "Invalid login credentials".
+const isUnvalidatedError = (err) => /validat|verif|confirm/i.test(
+  `${$auth.getErrorCode(err) || ""} ${$auth.getErrorMessage(err)}`,
+);
 
 function Login({ open, onClose, onOpenRegister }) {
   const { onUpdateGlobal } = useGlobal();
@@ -27,6 +34,8 @@ function Login({ open, onClose, onOpenRegister }) {
   const [error, setError] = useState({});
 
   const [loading, setLoading] = useState(false);
+  const [unvalidated, setUnvalidated] = useState(false);
+  const resend = useResendValidation();
 
   const fieldError = (name) => {
     const value = error[name];
@@ -36,6 +45,8 @@ function Login({ open, onClose, onOpenRegister }) {
 
   const handleSignIn = async () => {
     setError({});
+    setUnvalidated(false);
+    resend.clear();
     clearToasts();
     setLoading(true);
 
@@ -50,6 +61,7 @@ function Login({ open, onClose, onOpenRegister }) {
     } catch (err) {
       const fields = $auth.getFieldErrors(err);
       setError(Object.keys(fields).length ? fields : { non_field_errors: $auth.getErrorMessage(err) });
+      setUnvalidated(isUnvalidatedError(err));
     } finally {
       setLoading(false);
     }
@@ -87,76 +99,85 @@ function Login({ open, onClose, onOpenRegister }) {
 
   if (stage === "reset") {
     return (
-      <Modal
-        isOpen={open}
-        onClose={onClose}
-        size="md"
-        fullscreen={false}
+      <Dialog
+        open={open}
+        onOpenChange={(open) => { if (!open) onClose(); }}
+        size="m"
         title="Reset your password"
-        subtitle="We will e-mail you a link to set a new password."
+        description="We will e-mail you a link to set a new password."
+        primaryAction={{
+          label: loading ? "Sending…" : "Send reset link",
+          onClick: handleReset,
+          disabled: loading || !resetEmail.trim(),
+          closeOnClick: false,
+        }}
         secondaryAction={{
           label: "Back to Sign In",
           onClick: () => { setStage("signIn"); setResetNotice(null); },
           disabled: loading,
+          closeOnClick: false,
         }}
-        primaryAction={{
-          label: loading ? "Sending…" : "Send reset link",
-          disabled: loading || !resetEmail.trim(),
-          onClick: handleReset,
-        }}>
-
+      >
         <div className="ogcr-form-stack">
           {Boolean(resetNotice) && (
             <Message
-              variant={resetNotice.variant}
-              floating
+              state={resetNotice.variant}
+              type="floating"
               title={resetNotice.title}
               description={resetNotice.description}
-              onClose={() => setResetNotice(null)}
+              onDismiss={() => setResetNotice(null)}
             />
           )}
-          <TextField
+          <Input
             required
             type="email"
-            startIcon={<EnvelopeIcon />}
+            iconLeft={<EnvelopeIcon />}
             label="Email"
             value={resetEmail}
             onChange={(e) => setResetEmail(e.target.value)}
             placeholder="you@domain.com"
           />
         </div>
-
-      </Modal>
+      </Dialog>
     );
   }
 
   return (
-    <Modal
-      isOpen={open}
-      onClose={onClose}
-      size="md"
-      fullscreen={false}
+    <Dialog
+      open={open}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      size="m"
       title="Sign In"
-      subtitle="Enter your credentials to access your account."
-      secondaryAction={{
-        label: "Cancel",
-        onClick: onClose,
-        disabled: loading,
-      }}
-      primaryAction={{
-        label: "Sign In",
-        disabled: loading,
-        onClick: handleSignIn,
-      }}>
-
+      description="Enter your credentials to access your account."
+      primaryAction={{ label: "Sign In", onClick: handleSignIn, disabled: loading, closeOnClick: false }}
+      secondaryAction={{ label: "Cancel", disabled: loading }}
+    >
       <div className="ogcr-form-stack">
         {Boolean(error.non_field_errors) && (
-          <Message onClose={() => { setError({}) }} variant="error" floating title={"Sign In Failed"} description={error.non_field_errors} />
+          <Message
+            onDismiss={() => { setError({}); setUnvalidated(false); }}
+            state="error"
+            type="floating"
+            title={"Sign In Failed"}
+            description={unvalidated
+              ? `${error.non_field_errors} Open the link we e-mailed you, or ask for a new one.`
+              : error.non_field_errors}
+            actionLabel={unvalidated ? (resend.sending ? "Sending…" : "Resend confirmation e-mail") : undefined}
+            onAction={() => { if (!resend.sending) resend.send({ email: state.email }); }}
+          />
         )}
-        <TextField
+        {Boolean(resend.notice) && (
+          <Message
+            state={resend.notice.variant}
+            title={resend.notice.title}
+            description={resend.notice.description}
+            onDismiss={resend.clear}
+          />
+        )}
+        <Input
           required
           type="email"
-          startIcon={<EnvelopeIcon />}
+          iconLeft={<EnvelopeIcon />}
           label="Email"
           value={state.email}
           onChange={(e) => setState({ ...state, email: e.target.value })}
@@ -164,11 +185,11 @@ function Login({ open, onClose, onOpenRegister }) {
           error={Boolean(error.email) || Boolean(error.non_field_errors)}
           helperText={fieldError('email') || "Your username also works here."}
         />
-        <TextField
+        <Input
           required
           type={passwordType}
-          startIcon={<LockIcon />}
-          endIcon={passwordType === 'password' ? <EyeIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('text')} /> : <EyeClosedIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('password')} />}
+          iconLeft={<LockIcon />}
+          iconRight={passwordType === 'password' ? <EyeIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('text')} /> : <EyeClosedIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('password')} />}
           label="Password"
           value={state.password}
           onChange={(e) => setState({ ...state, password: e.target.value })}
@@ -179,12 +200,15 @@ function Login({ open, onClose, onOpenRegister }) {
 
         <span className="text-body-s ogcr-card__subtitle">
           <a onClick={() => setStage("reset")} className="text-link font-bold cursor-pointer">Forgot your password?</a>
+          {" · "}
+          <a onClick={() => resend.send({ email: state.email })} className="text-link font-bold cursor-pointer">
+            Resend confirmation e-mail
+          </a>
         </span>
 
         <span className="text-body-s ogcr-card__subtitle">You don't have an account? <a onClick={onOpenRegister} className="text-link font-bold cursor-pointer" >Sign up here</a></span>
       </div>
-
-    </Modal>
+    </Dialog>
   )
 }
 

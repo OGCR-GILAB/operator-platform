@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { StackIcon } from "@phosphor-icons/react";
-import Message from "../ui/Message";
+import { Message } from "@majistudio/ogcr-design-system";
 import ActivityMapBasemapSwitch from "./ActivityMapBasemapSwitch";
 import ActivityMapDrawer from "./ActivityMapDrawer";
 import ActivityMapLegendCard from "./ActivityMapLegendCard";
@@ -31,7 +31,9 @@ function ActivityMap() {
   const mapElement = useRef();
   const drawerId = useId();
 
-  const { activityId } = useActivity();
+  const { activityId, activity } = useActivity();
+  const isSubmitted = Boolean(activity?.submitted_at)
+    || ["submitted", "changes_requested", "accepted", "rejected"].includes(activity?.status);
   const { operatorId } = useGlobal();
 
   const [error, setError] = useState("");
@@ -169,22 +171,22 @@ function ActivityMap() {
 
       {Boolean(error) && (
         <Message
-          variant="warning"
+          state="warning"
           title="Could not load this activity's parcels"
           description={error}
-          onClose={() => setError("")}
+          onDismiss={() => setError("")}
         />
       )}
 
       {parcelFeatures?.length === 0 && (
         <Message
-          variant="neutral"
+          state="neutral"
           title="Nothing to show yet"
           description="This activity has no parcels. Add one from the Parcels tab and it will appear here."
         />
       )}
 
-      <div ref={mapFrame} className="ogcr-map-frame ogcr-card--floating">
+      <div ref={mapFrame} className="ogcr-map-frame">
         <div ref={mapElement} className="ogcr-map-shell" />
 
         {/* Positioning layer. It covers the map, so it lets clicks through and
@@ -215,6 +217,7 @@ function ActivityMap() {
           overlays={overlays}
           onOverlay={handleOverlay}
           parcels={parcelFeatures || []}
+          submitted={isSubmitted}
           selectedParcelId={selectedParcelId}
           onSelectParcel={handleSelectParcel}
           onHoverParcel={handleHoverParcel}

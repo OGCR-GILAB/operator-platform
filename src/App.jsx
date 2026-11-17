@@ -1,7 +1,7 @@
 import { Route, Routes, useNavigate, useResolvedPath, useLocation, Navigate } from "react-router-dom";
 import Header from "./components/header/Header";
 import { Container } from "./components/ui/Layout";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGlobal } from "./components/providers/GlobalContext";
 import Home from "./components/home/Home";
 import Footer from "./components/ui/Footer";
@@ -21,12 +21,12 @@ import ActivityDocuments from "./components/activity/ActivityDocuments";
 import ActivityMap from "./components/activity/ActivityMap";
 import NotFound from "./components/ui/NotFound";
 import Title from "./components/header/Title";
-import Button from "./components/ui/Button";
+import { Button, Tooltip } from "@majistudio/ogcr-design-system";
 import { LockIcon, UserIcon } from "@phosphor-icons/react";
-import Tooltip from "./components/ui/Tooltip";
 import Login from "./components/auth/Login";
 import { useToast } from "./components/providers/ToastContext";
 import SignUp from "./components/auth/SignUp";
+import ValidateEmail from "./components/auth/ValidateEmail";
 import OperatorSetupWizardModal from "./components/operator/OperatorSetupWizardModal";
 import useSignOut from "./components/auth/useSignOut";
 import $auth from "./services/$auth";
@@ -86,36 +86,59 @@ function Main() {
     acknowledgeSessionExpiry();
   }), [loggedIn, navigate, clearToasts, showToast, acknowledgeSessionExpiry]);
 
+  // Rate limiting and DCR outages hit every call in flight at once; one toast
+  // per status every few seconds is enough to say what is going on.
+  const lastServiceToast = useRef({});
+
+  useEffect(() => $auth.onServiceError(({ status }) => {
+    const now = Date.now();
+    if (now - (lastServiceToast.current[status] || 0) < 5000) return;
+    lastServiceToast.current[status] = now;
+
+    showToast(status === 429
+      ? {
+        variant: "warning",
+        title: "Too many requests",
+        description: "Please try again in a minute.",
+      }
+      : {
+        variant: "warning",
+        title: "DCR is unreachable",
+        description: "Please try again shortly.",
+      });
+  }), [showToast]);
+
   return (
     <>
       {loading && <LoadingScreen title="Operator Platform" statusText="Preparing operator workspace…" />}
       {!loading && (
-        <div className="app-root pt-10">
+        <div className="app-root pt-40">
 
-          <Container className="pb-10 gap-2">
-            <div className="flex flex-wrap justify-between items-center gap-2">
+          <Container className="pb-40 gap-8">
+            <div className="flex flex-wrap justify-between items-center gap-8">
               <Title heroAnimation={heroTitleAnimation} />
               {
                 !loggedIn ?
                   <Button onClick={() => {
                     setLoginModal(true);
-                  }} startIcon={<LockIcon />}>
+                  }} iconLeft={<LockIcon />}>
                     Sign In / Sign Up
                   </Button>
                   :
-                  <div className="flex flex-row items-center gap-1">
-                    <Button onClick={() => navigate('/profile')} className="flex flex-row items-center gap-2" variant="text" tone="positive">
+                  <div className="flex flex-row items-center gap-4">
+                    <Button onClick={() => navigate('/profile')} className="flex flex-row items-center gap-8" variant="text">
 
                       <UserIcon />
                       &nbsp;&nbsp;
                       <span>{me?.username}</span>
 
                     </Button>
-                    <Tooltip content="Sign Out">
-                      <Button onClick={signOut} variant="text" tone="warning">
-                        <LockIcon />
-                      </Button>
-
+                    <Tooltip
+                      trigger={(
+                        <Button iconOnly aria-label="Sign Out" variant="text" onClick={signOut} iconLeft={<LockIcon />} />
+                      )}
+                    >
+                      Sign Out
                     </Tooltip>
                   </div>
               }
@@ -126,12 +149,24 @@ function Main() {
               selected activity, and it should only ever be fetched once.
             */}
             <ActivityProvider>
-              <div className="flex" style={{flex: '1 1 auto'}}>
+              {/* On phones the DS sidebar is a bar with a drawer, so it sits on top. */}
+              <div className="flex flex-col sm:flex-row" style={{flex: '1 1 auto'}}>
                 <Header />
                 <Content>
                   <RouteTransition transitionKey={routeKey}>
                     <Routes>
-                      <Route index element={loggedIn ? <Navigate to="/overview" /> : <Home />} />
+                      <Route
+                        index
+                        element={loggedIn ? <Navigate to="/overview" /> : (
+                          <Home onOpenLogin={() => setLoginModal(true)} onOpenRegister={() => setRegisterModal(true)} />
+                        )}
+                      />
+
+                      {/* The confirmation link in DCR's e-mail; public by nature. */}
+                      <Route
+                        path="/validate-email"
+                        element={<ValidateEmail onOpenLogin={() => setLoginModal(true)} />}
+                      />
 
                       <Route element={<ProtectedRoute isAllowed={loggedIn} />}>
                         <Route path="/overview" element={<Overview />} />

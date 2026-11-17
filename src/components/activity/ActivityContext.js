@@ -10,6 +10,7 @@ export const ActivityContext = createContext({
   activity: null,
   readiness: null,
   editable: false,
+  documentsOpen: false,
   status: "idle",
   error: "",
   notFound: false,

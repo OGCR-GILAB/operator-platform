@@ -1,17 +1,16 @@
 import { useState } from "react";
-import { BuildingOfficeIcon, MapPinIcon, WalletIcon } from "@phosphor-icons/react";
+import { BuildingOfficeIcon, MapPinIcon, UserCircleIcon } from "@phosphor-icons/react";
 import { useGlobal } from "../providers/GlobalContext";
 import { useToast } from "../providers/ToastContext";
 import useSignOut from "../auth/useSignOut";
 import $auth from "../../services/$auth";
 import $operators from "../../services/$operators";
-import Button from "../ui/Button";
+import { Button, FormFooter, Input, Message, Select } from "@majistudio/ogcr-design-system";
+import Dialog from "../ui/Dialog";
 import Loader from "../ui/Loader";
-import Message from "../ui/Message";
-import Modal from "../ui/Modal";
-import Select from "../ui/Select";
-import TextField from "../ui/TextField";
-import { euAndCandidateCountryOptions } from "../projects/activityConfig";
+import ContactPhoneField from "../ui/ContactPhoneField";
+import { joinPhone } from "../ui/phone";
+import useCountryOptions from "../projects/useCountryOptions";
 
 const wizardSteps = [
   {
@@ -25,9 +24,9 @@ const wizardSteps = [
     description: "Where is the Operator registered?",
   },
   {
-    title: "Wallet & relationship",
-    icon: WalletIcon,
-    description: "Link your OGCR wallet and your role at this Operator.",
+    title: "Your role",
+    icon: UserCircleIcon,
+    description: "Tell us your role at this Operator.",
   },
 ];
 
@@ -37,7 +36,8 @@ const initialForm = {
   address_line_2: "",
   postcode: "",
   country_code: "",
-  ogcr_wallet_address: "",
+  phone_code: "",
+  phone_number: "",
   relationship: "",
 };
 
@@ -45,6 +45,7 @@ function OperatorSetupWizardModal({ isOpen }) {
   const { me, refreshOperator } = useGlobal();
   const { showToast } = useToast();
   const signOut = useSignOut();
+  const countryOptions = useCountryOptions();
 
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(initialForm);
@@ -86,8 +87,8 @@ function OperatorSetupWizardModal({ isOpen }) {
   };
 
   const handleSubmit = async () => {
-    if (!form.ogcr_wallet_address || !form.relationship) {
-      setError("Please provide your wallet address and your relationship to this Operator.");
+    if (!form.relationship) {
+      setError("Please describe your relationship to this Operator.");
       return;
     }
 
@@ -96,7 +97,8 @@ function OperatorSetupWizardModal({ isOpen }) {
 
     try {
       // Creating the Operator makes the current user its first member,
-      // so the relationship travels with the same request.
+      // so the relationship travels with the same request. The OGCR wallet is
+      // not sent: the registry assigns it when the operator is registered.
       await $operators.create({
         legal_name: form.legal_name,
         email: me?.email,
@@ -104,7 +106,7 @@ function OperatorSetupWizardModal({ isOpen }) {
         address_line_2: form.address_line_2,
         postcode: form.postcode,
         country_code: form.country_code,
-        ogcr_wallet_address: form.ogcr_wallet_address,
+        phone: joinPhone(form.phone_code, form.phone_number),
         relationship: form.relationship,
       });
 
@@ -123,15 +125,13 @@ function OperatorSetupWizardModal({ isOpen }) {
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={() => {}}
+    // No onOpenChange: the gate cannot be dismissed (see the footer).
+    <Dialog
+      open={isOpen}
       title="Set up your Operator profile"
       description={wizardSteps[step].description}
       size="xl"
-      hideCloseButton
-      closeOnEscape={false}
-      closeOnOverlayClick={false}
+      showClose={false}
     >
       <div className="ogcr-project-wizard">
         <ol
@@ -160,19 +160,19 @@ function OperatorSetupWizardModal({ isOpen }) {
 
         <div className="ogcr-project-wizard__body">
           {Boolean(error) && (
-            <Message onClose={() => setError("")} variant="error" floating title="Setup failed" description={error} />
+            <Message onDismiss={() => setError("")} state="error" type="floating" title="Setup failed" description={error} />
           )}
 
           {step === 0 && (
             <div className="ogcr-project-wizard__grid">
-              <TextField
+              <Input
                 label="Legal name"
                 placeholder="e.g., Agreena, or John Smith"
                 value={form.legal_name}
                 onChange={(event) => handleFieldChange("legal_name", event.target.value)}
                 required
               />
-              <TextField
+              <Input
                 type="email"
                 label="Email"
                 value={me?.email || ""}
@@ -181,25 +181,32 @@ function OperatorSetupWizardModal({ isOpen }) {
                 helperText="Taken from your account email."
                 required
               />
+              <ContactPhoneField
+                label="Phone"
+                countryCode={form.phone_code}
+                phone={form.phone_number}
+                onCountryCodeChange={(value) => handleFieldChange("phone_code", value)}
+                onPhoneChange={(value) => handleFieldChange("phone_number", value)}
+              />
             </div>
           )}
 
           {step === 1 && (
             <div className="ogcr-project-wizard__grid">
-              <TextField
+              <Input
                 label="Address line 1"
                 placeholder="Green Street, 20"
                 value={form.address_line_1}
                 onChange={(event) => handleFieldChange("address_line_1", event.target.value)}
                 required
               />
-              <TextField
+              <Input
                 label="Address line 2"
                 placeholder="Suite 400"
                 value={form.address_line_2}
                 onChange={(event) => handleFieldChange("address_line_2", event.target.value)}
               />
-              <TextField
+              <Input
                 label="Postcode"
                 placeholder="10115"
                 value={form.postcode}
@@ -208,9 +215,9 @@ function OperatorSetupWizardModal({ isOpen }) {
               />
               <Select
                 label="Country"
-                value={form.country_code}
-                onChange={(event) => handleFieldChange("country_code", event.target.value)}
-                options={euAndCandidateCountryOptions}
+                value={form.country_code || null}
+                onValueChange={(value) => handleFieldChange("country_code", value)}
+                options={countryOptions}
                 placeholder="Select country"
                 required
               />
@@ -219,14 +226,7 @@ function OperatorSetupWizardModal({ isOpen }) {
 
           {step === 2 && (
             <div className="ogcr-project-wizard__grid">
-              <TextField
-                label="OGCR wallet address"
-                placeholder="0x..."
-                value={form.ogcr_wallet_address}
-                onChange={(event) => handleFieldChange("ogcr_wallet_address", event.target.value)}
-                required
-              />
-              <TextField
+              <Input
                 label="Your relationship to this Operator"
                 placeholder="e.g., Managing Director, Employee, Accountant"
                 value={form.relationship}
@@ -238,21 +238,21 @@ function OperatorSetupWizardModal({ isOpen }) {
         </div>
       </div>
 
-      <div className="ogcr-modal__footer">
-        {/*
-          The gate cannot be dismissed — that is deliberate, an account without an
-          Operator has nothing to do in the app. But the top bar's Sign Out sits
-          behind this overlay, so without this button there is no way back out.
-        */}
-        <Button
-          className="mr-auto"
-          variant="text"
-          tone="warning"
-          onClick={signOut}
-          disabled={submitting}
-        >
-          Sign out
-        </Button>
+      <FormFooter>
+        {step < wizardSteps.length - 1 ? (
+          <Button variant="filled" onClick={handleNext} disabled={submitting}>
+            Next
+          </Button>
+        ) : (
+          <Button
+            variant="filled"
+            onClick={handleSubmit}
+            disabled={submitting}
+            iconLeft={submitting ? <Loader variant="spinner" size="s" label="Creating Operator" /> : null}
+          >
+            {submitting ? "Creating..." : "Create Operator"}
+          </Button>
+        )}
 
         {step > 0 && (
           <Button variant="outlined" onClick={handleBack} disabled={submitting}>
@@ -260,23 +260,21 @@ function OperatorSetupWizardModal({ isOpen }) {
           </Button>
         )}
 
-        {step < wizardSteps.length - 1 ? (
-          <Button variant="filled" tone="brand" onClick={handleNext} disabled={submitting}>
-            Next
-          </Button>
-        ) : (
-          <Button
-            variant="filled"
-            tone="brand"
-            onClick={handleSubmit}
-            disabled={submitting}
-            startIcon={submitting ? <Loader variant="spinner" size="s" label="Creating Operator" /> : null}
-          >
-            {submitting ? "Creating..." : "Create Operator"}
-          </Button>
-        )}
-      </div>
-    </Modal>
+        {/*
+          The gate cannot be dismissed — that is deliberate, an account without an
+          Operator has nothing to do in the app. But the top bar's Sign Out sits
+          behind this overlay, so without this button there is no way back out.
+        */}
+        <Button
+          className="ml-auto"
+          variant="text"
+          onClick={signOut}
+          disabled={submitting}
+        >
+          Sign out
+        </Button>
+      </FormFooter>
+    </Dialog>
   );
 }
 

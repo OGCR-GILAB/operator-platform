@@ -1,17 +1,15 @@
 import { useState } from "react";
-import { AddressBookIcon, ArrowLeftIcon, CheckIcon, EnvelopeIcon, EyeClosedIcon, EyeIcon, LockIcon, SealCheckIcon } from "@phosphor-icons/react";
-import Modal, { CloseGlyph } from "../ui/Modal";
-import TextField from "../ui/TextField";
-import Message from "../ui/Message";
+import { AddressBookIcon, ArrowLeftIcon, CheckIcon, EnvelopeIcon, EyeClosedIcon, EyeIcon, LockIcon, SealCheckIcon, XIcon } from "@phosphor-icons/react";
+import { Button, Input, Message } from "@majistudio/ogcr-design-system";
+import ContactPhoneField from "../ui/ContactPhoneField";
+import { joinPhone, phoneProblem } from "../ui/phone";
+import usePasswordPolicy, { checkPassword } from "./usePasswordPolicy";
+import useResendValidation from "./useResendValidation";
 import $auth from "../../services/$auth";
 import { useGlobal } from "../providers/GlobalContext";
 import { useToast } from "../providers/ToastContext";
 import { useNavigate } from "react-router-dom";
-
-// DCR's policy: at least 10 characters with upper case, lower case, digits and a
-// special character — or longer than 16. The API surfaces DCR's own wording on a
-// rejection; this is only the hint shown before the user submits.
-const PASSWORD_HINT = "At least 10 characters with upper and lower case, a digit and a special character (or longer than 16).";
+import Dialog from "../ui/Dialog";
 
 function SignUp({ open, onClose, onOpenLogin }) {
   const { onUpdateGlobal } = useGlobal();
@@ -24,6 +22,11 @@ function SignUp({ open, onClose, onOpenLogin }) {
   const [stage, setStage] = useState("form");
   const [validationNotice, setValidationNotice] = useState("");
   const [token, setToken] = useState("");
+  const resend = useResendValidation();
+
+  // DCR's own rules, checked as the user types. Unknown (503) means no check:
+  // the API and DCR still validate on submit.
+  const { policy, description: passwordDescription } = usePasswordPolicy();
 
   const [state, setState] = useState({
     email: '',
@@ -31,8 +34,12 @@ function SignUp({ open, onClose, onOpenLogin }) {
     password: '',
     repeat: '',
     first_name: '',
-    last_name: ''
+    last_name: '',
+    phoneCountryCode: '',
+    phoneNumber: '',
   })
+
+  const passwordCheck = checkPassword(policy, state.password);
 
   const [error, setError] = useState({});
 
@@ -44,11 +51,11 @@ function SignUp({ open, onClose, onOpenLogin }) {
     }
 
     if (password !== repeat) {
-      return <CloseGlyph color="red" />
+      return <XIcon className="text-icon-negative" />
     }
 
     if (password === repeat) {
-      return <CheckIcon color="green" />
+      return <CheckIcon className="text-icon-positive" />
     }
   }
 
@@ -75,8 +82,19 @@ function SignUp({ open, onClose, onOpenLogin }) {
   const handleRegister = async () => {
     setError({});
 
+    if (passwordCheck.valid === false) {
+      setError({ password: passwordCheck.hint });
+      return;
+    }
+
     if (state.password !== state.repeat) {
       setError({ repeat: "Passwords do not match." });
+      return;
+    }
+
+    const phoneError = phoneProblem(state.phoneCountryCode, state.phoneNumber);
+    if (phoneError) {
+      setError({ mobile_phone_number: phoneError });
       return;
     }
 
@@ -86,7 +104,10 @@ function SignUp({ open, onClose, onOpenLogin }) {
     try {
       // POST auth/register/ creates the DCR user *and* the local mirror. Posting
       // to DCR directly skips the mirror and the account can never join an operator.
-      const { detail } = await $auth.register(state);
+      const { detail } = await $auth.register({
+        ...state,
+        mobile_phone_number: joinPhone(state.phoneCountryCode, state.phoneNumber),
+      });
 
       // DCR asks for e-mail validation for some deployments; `detail` says so.
       if (/valid/i.test(detail || '')) {
@@ -121,76 +142,88 @@ function SignUp({ open, onClose, onOpenLogin }) {
 
   if (stage === "validate") {
     return (
-      <Modal
-        isOpen={open}
-        onClose={onClose}
-        size="md"
-        fullscreen={false}
+      <Dialog
+        open={open}
+        onOpenChange={(open) => { if (!open) onClose(); }}
+        size="m"
         title="Confirm your e-mail"
-        subtitle="We sent you a confirmation link. Paste the token from that e-mail to finish."
-        secondaryAction={{
-          label: "Cancel",
-          onClick: onClose,
-          disabled: loading,
-        }}
+        description="We sent you a confirmation link. Paste the token from that e-mail to finish."
         primaryAction={{
           label: "Confirm",
-          disabled: loading || !token.trim(),
           onClick: handleValidate,
-        }}>
+          disabled: loading || !token.trim(),
+          closeOnClick: false,
+        }}
+        secondaryAction={{ label: "Cancel", disabled: loading }}
+      >
 
         <div className="ogcr-form-stack">
           {Boolean(error.non_field_errors) && (
-            <Message onClose={() => { setError({}) }} variant="error" floating title={"Confirmation Failed"} description={error.non_field_errors} />
+            <Message onDismiss={() => { setError({}) }} state="error" type="floating" title={"Confirmation Failed"} description={error.non_field_errors} />
           )}
           {Boolean(validationNotice) && (
-            <Message variant="success" title={"Account created"} description={validationNotice} />
+            <Message state="success" title={"Account created"} description={validationNotice} />
           )}
-          <TextField
+          {Boolean(resend.notice) && (
+            <Message
+              state={resend.notice.variant}
+              title={resend.notice.title}
+              description={resend.notice.description}
+              onDismiss={resend.clear}
+            />
+          )}
+          <Input
             required
             type="text"
-            startIcon={<SealCheckIcon />}
+            iconLeft={<SealCheckIcon />}
             label="Validation token"
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder="Paste the token from the e-mail"
             error={Boolean(error.token) || Boolean(error.non_field_errors)}
-            helperText={fieldError('token')}
+            helperText={fieldError('token') || "Or simply open the link in the e-mail."}
           />
-          <span className="text-body-s ogcr-card__subtitle flex flex-row gap-2 items-center text-text-positive"><ArrowLeftIcon /> <a onClick={onOpenLogin} className="text-link font-bold cursor-pointer">Back to Sign In</a></span>
+          <span className="text-body-s ogcr-card__subtitle flex flex-row flex-wrap gap-8 items-center">
+            No e-mail?
+            <Button
+              variant="text"
+              size="s"
+              disabled={resend.sending}
+              onClick={() => resend.send({ email: state.email, username: state.username })}
+            >
+              {resend.sending ? "Sending…" : "Send it again"}
+            </Button>
+          </span>
+          <span className="text-body-s ogcr-card__subtitle flex flex-row gap-8 items-center text-text-positive"><ArrowLeftIcon /> <a onClick={onOpenLogin} className="text-link font-bold cursor-pointer">Back to Sign In</a></span>
         </div>
-
-      </Modal>
+      </Dialog>
     );
   }
 
   return (
-    <Modal
-      isOpen={open}
-      onClose={onClose}
-      size="md"
-      fullscreen={false}
+    <Dialog
+      open={open}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      size="m"
       title="Sign Up"
-      subtitle="Enter your personal information to create your account."
-      secondaryAction={{
-        label: "Cancel",
-        onClick: onClose,
-        disabled: loading,
-      }}
+      description="Enter your personal information to create your account."
       primaryAction={{
         label: "Sign Up",
-        disabled: loading,
         onClick: handleRegister,
-      }}>
+        disabled: loading,
+        closeOnClick: false,
+      }}
+      secondaryAction={{ label: "Cancel", disabled: loading }}
+    >
 
       <div className="ogcr-form-stack">
         {Boolean(error.non_field_errors) && (
-          <Message onClose={() => { setError({}) }} variant="error" floating title={"Sign Up Failed"} description={error.non_field_errors} />
+          <Message onDismiss={() => { setError({}) }} state="error" type="floating" title={"Sign Up Failed"} description={error.non_field_errors} />
         )}
-        <TextField
+        <Input
           required
           type="text"
-          startIcon={<AddressBookIcon />}
+          iconLeft={<AddressBookIcon />}
           label="First Name"
           value={state.first_name}
           onChange={(e) => setState({ ...state, first_name: e.target.value })}
@@ -198,10 +231,10 @@ function SignUp({ open, onClose, onOpenLogin }) {
           error={Boolean(error.first_name) || Boolean(error.non_field_errors)}
           helperText={fieldError('first_name')}
         />
-        <TextField
+        <Input
           required
           type="text"
-          startIcon={<AddressBookIcon />}
+          iconLeft={<AddressBookIcon />}
           label="Last Name"
           value={state.last_name}
           onChange={(e) => setState({ ...state, last_name: e.target.value })}
@@ -209,9 +242,9 @@ function SignUp({ open, onClose, onOpenLogin }) {
           error={Boolean(error.last_name) || Boolean(error.non_field_errors)}
           helperText={fieldError('last_name')}
         />
-        <TextField
+        <Input
           type="text"
-          startIcon={<AddressBookIcon />}
+          iconLeft={<AddressBookIcon />}
           label="Username"
           value={state.username}
           onChange={(e) => setState({ ...state, username: e.target.value })}
@@ -219,10 +252,10 @@ function SignUp({ open, onClose, onOpenLogin }) {
           error={Boolean(error.username) || Boolean(error.non_field_errors)}
           helperText={fieldError('username') || "Optional — derived from your e-mail if left blank."}
         />
-        <TextField
+        <Input
           required
           type="email"
-          startIcon={<EnvelopeIcon />}
+          iconLeft={<EnvelopeIcon />}
           label="Email"
           value={state.email}
           onChange={(e) => setState({ ...state, email: e.target.value })}
@@ -230,24 +263,46 @@ function SignUp({ open, onClose, onOpenLogin }) {
           error={Boolean(error.email) || Boolean(error.non_field_errors)}
           helperText={fieldError('email')}
         />
-        <TextField
+        <ContactPhoneField
+          label="Mobile phone"
+          countryCode={state.phoneCountryCode}
+          phone={state.phoneNumber}
+          onCountryCodeChange={(value) => {
+            setState({ ...state, phoneCountryCode: value });
+            if (error.mobile_phone_number) setError({ ...error, mobile_phone_number: undefined });
+          }}
+          onPhoneChange={(value) => {
+            setState({ ...state, phoneNumber: value });
+            if (error.mobile_phone_number) setError({ ...error, mobile_phone_number: undefined });
+          }}
+          error={Boolean(error.mobile_phone_number)}
+          helperText={fieldError('mobile_phone_number')
+            || "Optional. International format, e.g. +33 6 12 34 56 78: choose the country code, then the number without the leading 0."}
+        />
+        <Input
           required
           type={passwordType}
-          startIcon={<LockIcon />}
-          endIcon={passwordType === 'password' ? <EyeIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('text')} /> : <EyeClosedIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('password')} />}
+          iconLeft={<LockIcon />}
+          iconRight={passwordType === 'password' ? <EyeIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('text')} /> : <EyeClosedIcon className="ogcr-clickable-icon transition-transform" onClick={() => setPasswordType('password')} />}
           label="Password"
           value={state.password}
-          onChange={(e) => setState({ ...state, password: e.target.value })}
+          onChange={(e) => {
+            setState({ ...state, password: e.target.value });
+            // The live hint below takes over from a refusal once the user edits.
+            if (error.password) setError({ ...error, password: undefined });
+          }}
           placeholder="Enter your password"
           error={Boolean(error.password) || Boolean(error.non_field_errors)}
-          helperText={fieldError('password') || PASSWORD_HINT}
+          helperText={fieldError('password')
+            || (passwordCheck.valid === true ? "Meets DCR's password rules." : passwordCheck.hint)
+            || passwordDescription}
         />
 
-        <TextField
+        <Input
           required
           type="password"
-          startIcon={<LockIcon />}
-          endIcon={validatePasswordField()}
+          iconLeft={<LockIcon />}
+          iconRight={validatePasswordField()}
           label="Repeat Password"
           value={state.repeat}
           onChange={(e) => setState({ ...state, repeat: e.target.value })}
@@ -255,10 +310,9 @@ function SignUp({ open, onClose, onOpenLogin }) {
           error={Boolean(error.repeat) || Boolean(error.non_field_errors)}
           helperText={fieldError('repeat')}
         />
-        <span className="text-body-s ogcr-card__subtitle flex flex-row gap-2 items-center text-text-positive"><ArrowLeftIcon /> <a onClick={onOpenLogin} className="text-link font-bold cursor-pointer">Back to Sign In</a></span>
+        <span className="text-body-s ogcr-card__subtitle flex flex-row gap-8 items-center text-text-positive"><ArrowLeftIcon /> <a onClick={onOpenLogin} className="text-link font-bold cursor-pointer">Back to Sign In</a></span>
       </div>
-
-    </Modal>
+    </Dialog>
   )
 }
 

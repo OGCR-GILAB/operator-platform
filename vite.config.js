@@ -13,5 +13,15 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss()],
+    build: {
+      rollupOptions: {
+        output: {
+          // The pdf.js worker ships as .mjs, which servers without an .mjs mime mapping send as
+          // application/octet-stream and browsers then refuse to run. As .js it is served as JavaScript.
+          assetFileNames: ({ names }) =>
+            names?.[0]?.endsWith('.mjs') ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]',
+        },
+      },
+    },
   }
 })
