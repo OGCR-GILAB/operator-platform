@@ -5,11 +5,10 @@ import ActivityMapBasemapSwitch from "./ActivityMapBasemapSwitch";
 import ActivityMapDrawer from "./ActivityMapDrawer";
 import ActivityMapLegendCard from "./ActivityMapLegendCard";
 import { useActivity } from "./ActivityContext";
-import { useGlobal } from "../providers/GlobalContext";
 import $map, { BASEMAPS, parcelKey } from "../../services/$map";
 import $projects from "../../services/$projects";
-import $parcels from "../../services/$parcels";
 import $auth from "../../services/$auth";
+import Parcel from "../../models/parcel";
 
 /**
  * This activity's land, and nothing else. No cadastre and no administrative
@@ -34,7 +33,6 @@ function ActivityMap() {
   const { activityId, activity } = useActivity();
   const isSubmitted = Boolean(activity?.submitted_at)
     || ["submitted", "changes_requested", "accepted", "rejected"].includes(activity?.status);
-  const { operatorId } = useGlobal();
 
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState(BASEMAPS[0].id);
@@ -87,8 +85,9 @@ function ActivityMap() {
     };
   }, [updateMapHeight]);
 
-  // `parcels/geojson/` has no activity filter, so the activity's parcel ids come
-  // from the link endpoint and narrow the Operator-wide collection here.
+  // The link rows carry each parcel, geometry included, on `parcel_detail`. Not
+  // `parcels/geojson/`: that is scoped to the operator selected in the header,
+  // which need not be the one this activity belongs to.
   useEffect(() => {
     if (!activityId) return undefined;
 
@@ -100,18 +99,15 @@ function ActivityMap() {
       $map.fitToFeatures(featureCollection);
     };
 
-    Promise.all([
-      $projects.allParcels(activityId),
-      $parcels.geojson(operatorId ? { operator: operatorId } : undefined),
-    ])
-      .then(([links, featureCollection]) => {
+    $projects.allParcels(activityId)
+      .then((links) => {
         if (cancelled) return;
 
-        const ids = new Set(links.map((link) => String(link.parcel_detail?.id ?? link.parcel)));
         const mine = {
           type: "FeatureCollection",
-          features: (featureCollection?.features || [])
-            .filter((feature) => ids.has(String(feature.id ?? feature.properties?.id))),
+          features: links
+            .map((link) => link.parcel_detail && new Parcel(link.parcel_detail).toFeature())
+            .filter(Boolean),
         };
 
         setParcelFeatures(mine.features);
@@ -129,7 +125,7 @@ function ActivityMap() {
       });
 
     return () => { cancelled = true; };
-  }, [activityId, operatorId]);
+  }, [activityId]);
 
   const handleBasemap = (id) => {
     setBasemap(id);
